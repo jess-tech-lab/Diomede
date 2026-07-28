@@ -21,7 +21,7 @@ log = get_logger(__name__, "DAEMON")
 # Configuration from environment
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-POLL_INTERVAL_S = int(os.getenv("POLL_INTERVAL_S", "10"))
+POLL_INTERVAL_S = int(os.getenv("DAEMON_POLL_INTERVAL_S", "10"))
 REDIS_TTL_S = int(os.getenv("REDIS_TTL_S", "30"))
 HTTP_TIMEOUT_S = float(os.getenv("HTTP_TIMEOUT_S", "5"))
 CA_CERT = os.getenv("REQUESTS_CA_BUNDLE", "")

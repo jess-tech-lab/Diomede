@@ -13,15 +13,15 @@ from src.utils.logging_config import get_logger
 
 log = get_logger(__name__, "FORWARDER")
 
-ORCH_URL = os.getenv("ORCH_URL", "http://orchestrator:8000/get-best-node")
-ORCH_HEARTBEAT_URL = os.getenv("ORCH_HEARTBEAT_URL", "http://orchestrator:8000/heartbeat")
+ORCH_URL = os.getenv("ORCH_URL", "https://orchestrator:8000/get-best-node")
+ORCH_HEARTBEAT_URL = os.getenv("ORCH_HEARTBEAT_URL", "https://orchestrator:8000/heartbeat")
 ORCH_API_KEY = os.getenv("ORCHESTRATOR_API_KEY", "")
 if not ORCH_API_KEY:
     raise RuntimeError("ORCHESTRATOR_API_KEY environment variable must be set")
 AGENT_ID = os.getenv("AGENT_ID", "")
 if not AGENT_ID:
     raise RuntimeError("AGENT_ID environment variable must be set")
-POLL_INTERVAL_S = int(os.getenv("POLL_INTERVAL_S", "5"))
+POLL_INTERVAL_S = int(os.getenv("FORWARDER_POLL_INTERVAL_S", "5"))
 PROBE_INTERVAL_S = int(os.getenv("PROBE_INTERVAL_S", "3600"))
 CA_CERT = os.getenv("REQUESTS_CA_BUNDLE", "")
 
@@ -33,19 +33,19 @@ class _NodeCfg(TypedDict):
 
 CLOUD_NODES: dict[str, _NodeCfg] = {
     "us-east1": {
-        "base": os.getenv("NODE_US_BASE", "http://orthanc-us:8042"),
+        "base": os.getenv("NODE_US_BASE", "https://orthanc-us:8042"),
         "auth": (os.getenv("NODE_US_USER", "orthanc"), os.getenv("NODE_US_PASS", "orthanc")),
     },
     "eu-west1": {
-        "base": os.getenv("NODE_EU_BASE", "http://orthanc-eu:8042"),
+        "base": os.getenv("NODE_EU_BASE", "https://orthanc-eu:8042"),
         "auth": (os.getenv("NODE_EU_USER", "orthanc"), os.getenv("NODE_EU_PASS", "orthanc")),
     },
     "asia-northeast1": {
-        "base": os.getenv("NODE_ASIA_BASE", "http://orthanc-asia:8042"),
+        "base": os.getenv("NODE_ASIA_BASE", "https://orthanc-asia:8042"),
         "auth": (os.getenv("NODE_ASIA_USER", "orthanc"), os.getenv("NODE_ASIA_PASS", "orthanc")),
     },
     "af-south1": {
-        "base": os.getenv("NODE_AF_BASE", "http://orthanc-af:8042"),
+        "base": os.getenv("NODE_AF_BASE", "https://orthanc-af:8042"),
         "auth": (os.getenv("NODE_AF_USER", "orthanc"), os.getenv("NODE_AF_PASS", "orthanc")),
     },
 }

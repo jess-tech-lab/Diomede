@@ -14,10 +14,10 @@ services:
   # Cloud DICOM Node - US East (GCP us-east1 simulation)
   orthanc-us:
     image: orthancteam/orthanc:26.4.2
-    container_name: orthanc-us
+    container_name: ${REGION1_HOST}
     ports:
-      - "8042:8042"  # REST API (HTTPS)
-      - "4242:4242"  # DIMSE-TLS
+      - "${REGION1_HTTPS_PORT}:${ORTHANC_HTTPS_PORT}"
+      - "${REGION1_DICOM_PORT}:${ORTHANC_DICOM_PORT}"
     env_file: .env
     entrypoint: /bin/sh
     command:
@@ -54,10 +54,10 @@ services:
   # Cloud DICOM Node - EU West (GCP eu-west1 simulation)
   orthanc-eu:
     image: orthancteam/orthanc:26.4.2
-    container_name: orthanc-eu
+    container_name: ${REGION2_HOST}
     ports:
-      - "8043:8042"  # REST API (HTTPS)
-      - "4243:4242"  # DIMSE-TLS
+      - "${REGION2_HTTPS_PORT}:${ORTHANC_HTTPS_PORT}"
+      - "${REGION2_DICOM_PORT}:${ORTHANC_DICOM_PORT}"
     env_file: .env
     entrypoint: /bin/sh
     command:
@@ -94,10 +94,10 @@ services:
   # Cloud DICOM Node - Asia Northeast (GCP asia-northeast1 simulation)
   orthanc-asia:
     image: orthancteam/orthanc:26.4.2
-    container_name: orthanc-asia
+    container_name: ${REGION3_HOST}
     ports:
-      - "8044:8042"  # REST API (HTTPS)
-      - "4244:4242"  # DIMSE-TLS
+      - "${REGION3_HTTPS_PORT}:${ORTHANC_HTTPS_PORT}"
+      - "${REGION3_DICOM_PORT}:${ORTHANC_DICOM_PORT}"
     env_file: .env
     entrypoint: /bin/sh
     command:
@@ -134,10 +134,10 @@ services:
   # Cloud DICOM Node - Africa South (GCP af-south1 simulation)
   orthanc-af:
     image: orthancteam/orthanc:26.4.2
-    container_name: orthanc-af
+    container_name: ${REGION4_HOST}
     ports:
-      - "8045:8042"  # REST API (HTTPS)
-      - "4245:4242"  # DIMSE-TLS
+      - "${REGION4_HTTPS_PORT}:${ORTHANC_HTTPS_PORT}"
+      - "${REGION4_DICOM_PORT}:${ORTHANC_DICOM_PORT}"
     env_file: .env
     entrypoint: /bin/sh
     command:
@@ -178,44 +178,12 @@ services:
       dockerfile: ./config/orchestrator/Dockerfile
     container_name: orchestrator
     ports:
-      - "8000:8000"
-      # - "6379:6379"
+      - "${ORCHESTRATOR_HTTPS_PORT}:${ORCHESTRATOR_PORT}"
+      # - "${REDIS_PORT}:${REDIS_PORT}"
+    # All runtime config (REDIS_URL, DAEMON_POLL_INTERVAL_S, scoring weights,
+    # NODE_*_BASE/USER/PASS, REQUESTS_CA_BUNDLE, ...) comes from .env via
+    # env_file below.
     env_file: .env
-    environment:
-      # Telemetry configuration
-      REDIS_URL: "redis://localhost:6379"
-      POLL_INTERVAL_S: "10"
-      REDIS_TTL_S: "30"
-      HTTP_TIMEOUT_S: "5"
-
-      # Orchestrator scoring weights
-      W_QUEUE: "0.5"
-      W_DISK: "0.15"
-      W_RTT: "0.35"
-      MIN_FREE_MB: "500"
-
-      # Orchestrator API
-      REDIS_HOST: "localhost"
-      ORCHESTRATOR_API_KEY: "${ORCHESTRATOR_API_KEY}"
-
-      # Cloud node endpoints (HTTPS)
-      NODE_US_BASE: "https://orthanc-us:8042"
-      NODE_US_USER: "${ORTHANC_USER}"
-      NODE_US_PASS: "${ORTHANC_PASSWORD}"
-
-      NODE_EU_BASE: "https://orthanc-eu:8042"
-      NODE_EU_USER: "${ORTHANC_USER}"
-      NODE_EU_PASS: "${ORTHANC_PASSWORD}"
-
-      NODE_ASIA_BASE: "https://orthanc-asia:8042"
-      NODE_ASIA_USER: "${ORTHANC_USER}"
-      NODE_ASIA_PASS: "${ORTHANC_PASSWORD}"
-
-      NODE_AF_BASE: "https://orthanc-af:8042"
-      NODE_AF_USER: "${ORTHANC_USER}"
-      NODE_AF_PASS: "${ORTHANC_PASSWORD}"
-
-      REQUESTS_CA_BUNDLE: /certs/ca.pem
 
     volumes:
       - ./certs/orchestrator/server.crt:/certs/server.crt:ro
@@ -258,8 +226,8 @@ services:
       dockerfile: ./config/edge/Dockerfile
     container_name: edge-agent
     ports:
-      - "8046:8042"  # Edge Orthanc REST API (HTTPS)
-      - "4246:4242"  # Edge Orthanc DICOM
+      - "${EDGE_AGENT1_HTTPS_PORT}:${ORTHANC_HTTPS_PORT}"  # Edge Orthanc REST API
+      - "${EDGE_AGENT1_DICOM_PORT}:${ORTHANC_DICOM_PORT}"  # Edge Orthanc DICOM
     env_file: .env
     volumes:
       - ./config/orthanc/edge.template.json:/etc/orthanc/orthanc.template.json:ro
@@ -267,40 +235,21 @@ services:
       - ./certs/ca.pem:/certs/ca.pem:ro
       - orthanc-edge-data:/var/lib/orthanc/db
     environment:
-      # Edge Orthanc configuration (HTTPS on localhost)
-      EDGE_BASE: "https://localhost:8042"
-      EDGE_USER: "${ORTHANC_USER}"
-      EDGE_PASS: "${ORTHANC_PASSWORD}"
+      # EDGE_USER/PASS, NODE_*_BASE/USER/PASS, ORCHESTRATOR_API_KEY,
+      # FORWARDER_POLL_INTERVAL_S, PROBE_INTERVAL_S, and REQUESTS_CA_BUNDLE
+      # come from .env via env_file above. Only names that differ from
+      # their .env property key, or that are composed from one, need an
+      # explicit mapping here:
 
-      AGENT_ID: "agent-001"
+      # This container's own co-located Orthanc.
+      EDGE_BASE: "${NODE_INT_BASE}"
 
-      # Orchestrator connection (HTTPS)
-      ORCH_URL: "https://orchestrator:8000/get-best-node"
-      ORCH_HEARTBEAT_URL: "https://orchestrator:8000/heartbeat"
-      ORCHESTRATOR_API_KEY: "${ORCHESTRATOR_API_KEY}"
+      # Property key is EDGE_AGENT1; the forwarder code expects AGENT_ID.
+      AGENT_ID: "${EDGE_AGENT1}"
 
-      # Cloud node credentials for Forwarder (HTTPS)
-      NODE_US_BASE: "https://orthanc-us:8042"
-      NODE_US_USER: "${ORTHANC_USER}"
-      NODE_US_PASS: "${ORTHANC_PASSWORD}"
-
-      NODE_EU_BASE: "https://orthanc-eu:8042"
-      NODE_EU_USER: "${ORTHANC_USER}"
-      NODE_EU_PASS: "${ORTHANC_PASSWORD}"
-
-      NODE_ASIA_BASE: "https://orthanc-asia:8042"
-      NODE_ASIA_USER: "${ORTHANC_USER}"
-      NODE_ASIA_PASS: "${ORTHANC_PASSWORD}"
-
-      NODE_AF_BASE: "https://orthanc-af:8042"
-      NODE_AF_USER: "${ORTHANC_USER}"
-      NODE_AF_PASS: "${ORTHANC_PASSWORD}"
-
-      # Forwarder polling intervals
-      POLL_INTERVAL_S: "5"
-      PROBE_INTERVAL_S: "3600"
-
-      REQUESTS_CA_BUNDLE: /certs/ca.pem
+      # Orchestrator connection.
+      ORCH_URL: "${ORCHESTRATOR_BASE}/get-best-node"
+      ORCH_HEARTBEAT_URL: "${ORCHESTRATOR_BASE}/heartbeat"
 
     depends_on:
       orchestrator:
