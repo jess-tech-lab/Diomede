@@ -70,6 +70,7 @@ def send_batch(
     file_size: int | None,
     batch_size: int = 1,
     interval: float = 0.0,
+    random_pixels: bool = False,
 ) -> None:
 
     t0 = time.monotonic()
@@ -77,7 +78,7 @@ def send_batch(
 
     for i in range(batch_size):
         if file_size:
-            ds = make_sized(file_size)
+            ds = make_sized(file_size, random_pixels=random_pixels)
         else:
             ds = make_ct_8x8()
 
@@ -125,6 +126,11 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--file-size", type=int, default=None, help="Size of file sent in kb")
     p.add_argument("--batch-size", type=int, default=1, help="Number of files sent")
     p.add_argument("--interval", type=float, default=0.0, help="Time to pause in between sends")
+    p.add_argument(
+        "--random-pixels",
+        action="store_true",
+        help="Use random pixel data instead of all-zero bytes",
+    )
     return p.parse_args()
 
 
@@ -138,4 +144,5 @@ if __name__ == "__main__":
         file_size=args.file_size,
         batch_size=args.batch_size,
         interval=args.interval,
+        random_pixels=args.random_pixels,
     )

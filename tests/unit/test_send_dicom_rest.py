@@ -226,4 +226,4 @@ class TestSendBatch:
     def test_uses_make_sized_when_file_size_given(self, _ssl, _send, mock_sized, _sleep):
         send_batch("https://localhost:8042", "orthanc", "pass", "ca.pem", file_size=512)
 
-        mock_sized.assert_called_once_with(512)
+        mock_sized.assert_called_once_with(512, random_pixels=False)
