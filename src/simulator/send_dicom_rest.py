@@ -17,9 +17,12 @@ import sys
 import time
 
 import httpx
+from dotenv import load_dotenv
 
 from src.simulator.generate_dicom import make_ct_8x8, make_sized
 from src.utils.logging_config import get_logger
+
+load_dotenv()
 
 log = get_logger(__name__, "SIMULATOR")
 
@@ -111,15 +114,13 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--base-url",
-        default=os.environ.get("ORTHANC_BASE_URL", "https://localhost:8042"),
+        default=os.environ.get("ORTHANC_BASE_URL"),
         help="Orthanc base URL",
     )
-    p.add_argument(
-        "--user", default=os.environ.get("ORTHANC_USER", "orthanc"), help="Orthanc username"
-    )
+    p.add_argument("--user", default=os.environ.get("ORTHANC_USER"), help="Orthanc username")
     p.add_argument(
         "--password",
-        default=os.environ.get("ORTHANC_PASSWORD", "CHANGE_IN_PRODUCTION"),
+        default=os.environ.get("ORTHANC_PASSWORD"),
         help="Orthanc password",
     )
     p.add_argument("--ca-cert", default=_DEFAULT_CA_CERT, help="CA certificate path")

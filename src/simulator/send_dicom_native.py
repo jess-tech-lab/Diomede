@@ -11,10 +11,13 @@ import os
 import ssl
 import sys
 
+from dotenv import load_dotenv
 from pydicom import uid as dcm_uid
 from pynetdicom import AE
 
 from src.simulator.generate_dicom import make_ct_8x8
+
+load_dotenv()
 
 SecondaryCaptureImageStorage = dcm_uid.SecondaryCaptureImageStorage
 
@@ -65,23 +68,26 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Send 8×8 DICOM to an Orthanc node via DIMSE-TLS")
     p.add_argument(
         "--host",
-        default=os.environ.get("ORTHANC_DICOM_HOST", "localhost"),
+        default=os.environ.get("ORTHANC_DICOM_HOST"),
         help="Orthanc DICOM host",
     )
+    port_env = os.environ.get("ORTHANC_DICOM_PORT")
+    if port_env is None:
+        raise RuntimeError("ORTHANC_DICOM_PORT environment variable must be set")
     p.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("ORTHANC_DICOM_PORT", "4242")),
+        default=int(port_env),
         help="Orthanc DICOM port",
     )
     p.add_argument(
         "--called-aet",
-        default=os.environ.get("ORTHANC_CALLED_AET", "Orthanc_US"),
+        default=os.environ.get("ORTHANC_CALLED_AET"),
         help="Called AET (remote)",
     )
     p.add_argument(
         "--calling-aet",
-        default=os.environ.get("ORTHANC_CALLING_AET", "Simulator"),
+        default=os.environ.get("ORTHANC_CALLING_AET"),
         help="Calling AET (ours)",
     )
     p.add_argument("--ca-cert", default=_DEFAULT_CA_CERT, help="CA certificate path")
