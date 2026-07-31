@@ -220,36 +220,32 @@ services:
       retries: 3
 
   # Edge Agent: Edge Orthanc + Forwarder Daemon
-  edge-agent:
+  agent-001:
     build:
       context: .
       dockerfile: ./config/edge/Dockerfile
-    container_name: edge-agent
+    container_name: agent-001
     ports:
       - "${EDGE_AGENT1_HTTPS_PORT}:${ORTHANC_HTTPS_PORT}"  # Edge Orthanc REST API
       - "${EDGE_AGENT1_DICOM_PORT}:${ORTHANC_DICOM_PORT}"  # Edge Orthanc DICOM
     env_file: .env
     volumes:
       - ./config/orthanc/edge.template.json:/etc/orthanc/orthanc.template.json:ro
-      - ./certs/edge-agent:/etc/orthanc/certs:ro
+      - ./certs/agent-001:/etc/orthanc/certs:ro
       - ./certs/ca.pem:/certs/ca.pem:ro
       - orthanc-edge-data:/var/lib/orthanc/db
     environment:
       # EDGE_USER/PASS, NODE_*_BASE/USER/PASS, ORCHESTRATOR_API_KEY,
-      # FORWARDER_POLL_INTERVAL_S, PROBE_INTERVAL_S, and REQUESTS_CA_BUNDLE
-      # come from .env via env_file above. Only names that differ from
-      # their .env property key, or that are composed from one, need an
-      # explicit mapping here:
+      # ORCHESTRATOR_BASE, REGION1_NAME..REGION4_NAME, FORWARDER_POLL_INTERVAL_S,
+      # PROBE_INTERVAL_S, and REQUESTS_CA_BUNDLE come from .env via env_file
+      # above. Only names that differ from their .env property key, or that
+      # are composed from one, need an explicit mapping here:
 
       # This container's own co-located Orthanc.
       EDGE_BASE: "${NODE_INT_BASE}"
 
       # Property key is EDGE_AGENT1; the forwarder code expects AGENT_ID.
       AGENT_ID: "${EDGE_AGENT1}"
-
-      # Orchestrator connection.
-      ORCH_URL: "${ORCHESTRATOR_BASE}/get-best-node"
-      ORCH_HEARTBEAT_URL: "${ORCHESTRATOR_BASE}/heartbeat"
 
     depends_on:
       orchestrator:

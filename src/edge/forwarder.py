@@ -13,8 +13,11 @@ from src.utils.logging_config import get_logger
 
 log = get_logger(__name__, "FORWARDER")
 
-ORCH_URL = os.getenv("ORCH_URL", "https://orchestrator:8000/get-best-node")
-ORCH_HEARTBEAT_URL = os.getenv("ORCH_HEARTBEAT_URL", "https://orchestrator:8000/heartbeat")
+ORCHESTRATOR_BASE = os.getenv("ORCHESTRATOR_BASE", "")
+if not ORCHESTRATOR_BASE:
+    raise RuntimeError("ORCHESTRATOR_BASE environment variable must be set")
+ORCH_URL = f"{ORCHESTRATOR_BASE}/get-best-node"
+ORCH_HEARTBEAT_URL = f"{ORCHESTRATOR_BASE}/heartbeat"
 ORCH_API_KEY = os.getenv("ORCHESTRATOR_API_KEY", "")
 if not ORCH_API_KEY:
     raise RuntimeError("ORCHESTRATOR_API_KEY environment variable must be set")
@@ -31,20 +34,33 @@ class _NodeCfg(TypedDict):
     auth: tuple[str, str]
 
 
+REGION1_NAME = os.getenv("REGION1_NAME", "")
+if not REGION1_NAME:
+    raise RuntimeError("REGION1_NAME environment variable must be set")
+REGION2_NAME = os.getenv("REGION2_NAME", "")
+if not REGION2_NAME:
+    raise RuntimeError("REGION2_NAME environment variable must be set")
+REGION3_NAME = os.getenv("REGION3_NAME", "")
+if not REGION3_NAME:
+    raise RuntimeError("REGION3_NAME environment variable must be set")
+REGION4_NAME = os.getenv("REGION4_NAME", "")
+if not REGION4_NAME:
+    raise RuntimeError("REGION4_NAME environment variable must be set")
+
 CLOUD_NODES: dict[str, _NodeCfg] = {
-    "us-east1": {
+    REGION1_NAME: {
         "base": os.getenv("NODE_US_BASE", "https://orthanc-us:8042"),
         "auth": (os.getenv("NODE_US_USER", "orthanc"), os.getenv("NODE_US_PASS", "orthanc")),
     },
-    "eu-west1": {
+    REGION2_NAME: {
         "base": os.getenv("NODE_EU_BASE", "https://orthanc-eu:8042"),
         "auth": (os.getenv("NODE_EU_USER", "orthanc"), os.getenv("NODE_EU_PASS", "orthanc")),
     },
-    "asia-northeast1": {
+    REGION3_NAME: {
         "base": os.getenv("NODE_ASIA_BASE", "https://orthanc-asia:8042"),
         "auth": (os.getenv("NODE_ASIA_USER", "orthanc"), os.getenv("NODE_ASIA_PASS", "orthanc")),
     },
-    "af-south1": {
+    REGION4_NAME: {
         "base": os.getenv("NODE_AF_BASE", "https://orthanc-af:8042"),
         "auth": (os.getenv("NODE_AF_USER", "orthanc"), os.getenv("NODE_AF_PASS", "orthanc")),
     },

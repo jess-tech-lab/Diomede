@@ -19,7 +19,7 @@ environment so you can:
 | `orthanc-asia` | Cloud PACS node (GCP asia-northeast1) | REST 8044 · DICOM 4244 |
 | `orthanc-af` | Cloud PACS node (GCP af-south1) | REST 8045 · DICOM 4245 |
 | `orchestrator` | Redis + Telemetry Daemon + FastAPI (co-located) | 8000 |
-| `edge-agent` | Edge Orthanc + Forwarder Daemon (co-located) | REST 8046 · DICOM 4246 |
+| `agent-001` | Edge Orthanc + Forwarder Daemon (co-located) | REST 8046 · DICOM 4246 |
 
 The **Orchestrator container** runs three co-located processes, mirroring the
 production VM where all three always live on the same host:
@@ -31,7 +31,7 @@ production VM where all three always live on the same host:
 - `main.py` (via `uvicorn`) – FastAPI Orchestrator; reads Redis over `localhost`
   and serves `GET /get-best-node`, `POST /heartbeat`, `GET /nodes`
 
-The **Edge Agent** is a single container (`edge-agent`) running two co-located
+The **Edge Agent** is a single container (`agent-001`) running two co-located
 processes, which has the same pattern as the Orchestrator container:
 
 - **Edge Orthanc** - standard Orthanc PACS; legacy scanners (or the simulator
@@ -201,7 +201,7 @@ certs/
 ├── orthanc-eu/combined.pem
 ├── orthanc-asia/combined.pem
 ├── orthanc-af/combined.pem
-├── edge-agent/combined.pem         # Edge Orthanc uses the same combined format
+├── agent-001/combined.pem         # Edge Orthanc uses the same combined format
 └── diomede-client/
     ├── client.crt                  # clientAuth certificate — used by the simulator
     └── client.key
@@ -217,7 +217,7 @@ openssl rsa -in certs/ca.key -text -noout
 
 # Public certificate
 openssl x509 -in certs/diomede-client/client.crt -text -noout
-openssl x509 -in certs/edge-agent/server.crt -text -noout
+openssl x509 -in certs/agent-001/server.crt -text -noout
 openssl x509 -in certs/orchestrator/server.crt -text -noout
 openssl x509 -in certs/orthanc-us/server.crt -text -noout
 openssl x509 -in certs/orthanc-eu/server.crt -text -noout
@@ -226,7 +226,7 @@ openssl x509 -in certs/orthanc-af/server.crt -text -noout
 
 # Private key (no password for being used on the server)
 openssl rsa -in certs/diomede-client/client.key -text -noout
-openssl rsa -in certs/edge-agent/server.key -text -noout
+openssl rsa -in certs/agent-001/server.key -text -noout
 openssl rsa -in certs/orchestrator/server.key -text -noout
 openssl rsa -in certs/orthanc-us/server.key -text -noout
 openssl rsa -in certs/orthanc-eu/server.key -text -noout
@@ -234,8 +234,8 @@ openssl rsa -in certs/orthanc-asia/server.key -text -noout
 openssl rsa -in certs/orthanc-af/server.key -text -noout
 
 # Combined server certificate
-openssl x509 -in certs/edge-agent/combined.pem -text -noout
-openssl rsa -in certs/edge-agent/combined.pem
+openssl x509 -in certs/agent-001/combined.pem -text -noout
+openssl rsa -in certs/agent-001/combined.pem
 openssl x509 -in certs/orchestrator/combined.pem -text -noout
 openssl rsa -in certs/orchestrator/combined.pem
 openssl x509 -in certs/orthanc-us/combined.pem -text -noout
@@ -268,12 +268,12 @@ populate Redis:
 docker compose ps
 ```
 
-Since `orchestrator` and `edge-agent` have local Dockerfiles use `build`:
+Since `orchestrator` and `agent-001` have local Dockerfiles use `build`:
 ```bash
-docker compose build orchestrator edge-agent && docker compose up -d orchestrator edge-agent
+docker compose build orchestrator agent-001 && docker compose up -d orchestrator agent-001
 
 docker compose build orchestrator && docker compose up -d orchestrator
-docker compose build edge-agent && docker compose up -d edge-agent
+docker compose build agent-001 && docker compose up -d agent-001
 ```
 
 ### 4. Inject Simulated WAN Latency
@@ -392,7 +392,7 @@ Use `-k` to skip certificate verification against the self-signed cert:
 
 ```bash
 # Get the best node for routing
-curl -k -H "X-API-Key: your-api-key-here" "https://localhost:8000/get-best-node?agent_id=edge-agent"
+curl -k -H "X-API-Key: your-api-key-here" "https://localhost:8000/get-best-node?agent_id=agent-001"
 
 # List all registered nodes and their current telemetry
 curl -k -H "X-API-Key: your-api-key-here" "https://localhost:8000/nodes"
@@ -401,7 +401,7 @@ curl -k -H "X-API-Key: your-api-key-here" "https://localhost:8000/nodes"
  curl -k \
   -H "X-API-Key: your-api-key-here" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id": "edge-agent", "rtt_dict": {"us-east1": 10000, "eu-west1": 10000, "asia-northeast1": 10000, "af-south1": 1000}}' \
+  -d '{"agent_id": "agent-001", "rtt_dict": {"us-east1": 10000, "eu-west1": 10000, "asia-northeast1": 10000, "af-south1": 1000}}' \
   "https://localhost:8000/heartbeat"
 ```
 
@@ -502,7 +502,7 @@ docker compose logs --tail=50 <service>
 docker compose logs
 ```
 
-Any of the six service names works: `orthanc-us`, `orthanc-eu`, `orthanc-asia`, `orthanc-af`, `orchestrator`, `edge-agent`.
+Any of the six service names works: `orthanc-us`, `orthanc-eu`, `orthanc-asia`, `orthanc-af`, `orchestrator`, `agent-001`.
 
 #### Check container status and health
 
@@ -514,7 +514,7 @@ Any of the six service names works: `orthanc-us`, `orthanc-eu`, `orthanc-asia`, 
 >
 > The `Log` array in the output lists the last five health-check attempts with their exit codes and stdout/stderr.
 
-Some services only become healthy after their dependencies are healthy (e.g. `edge-agent` waits for `orchestrator`). If the dependency is unhealthy, fix it first, then restart the dependent service.
+Some services only become healthy after their dependencies are healthy (e.g. `agent-001` waits for `orchestrator`). If the dependency is unhealthy, fix it first, then restart the dependent service.
 
 ```bash
 docker compose restart <service>
@@ -526,7 +526,7 @@ Some common failures and their fixes are:
 |---|---|---|
 | `orchestrator` exits immediately | `ORCHESTRATOR_API_KEY` missing from `.env` | Add it to `.env` |
 | `orchestrator` unhealthy | Redis or uvicorn not ready within healthcheck window | `docker compose logs orchestrator` to confirm, then `docker compose restart orchestrator` |
-| `edge-agent` unhealthy | `orchestrator` not healthy yet (`depends_on` blocks it) | Wait for orchestrator to become healthy first |
+| `agent-001` unhealthy | `orchestrator` not healthy yet (`depends_on` blocks it) | Wait for orchestrator to become healthy first |
 | Regional node unhealthy | Template substitution failed (bad variable replacement) or Orthanc config error | Check logs: `docker compose logs orthanc-<region>` |
 
 ---

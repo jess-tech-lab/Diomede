@@ -27,8 +27,21 @@ HTTP_TIMEOUT_S = float(os.getenv("HTTP_TIMEOUT_S", "5"))
 CA_CERT = os.getenv("REQUESTS_CA_BUNDLE", "")
 
 
+REGION1_NAME = os.getenv("REGION1_NAME", "")
+if not REGION1_NAME:
+    raise RuntimeError("REGION1_NAME environment variable must be set")
+REGION2_NAME = os.getenv("REGION2_NAME", "")
+if not REGION2_NAME:
+    raise RuntimeError("REGION2_NAME environment variable must be set")
+REGION3_NAME = os.getenv("REGION3_NAME", "")
+if not REGION3_NAME:
+    raise RuntimeError("REGION3_NAME environment variable must be set")
+REGION4_NAME = os.getenv("REGION4_NAME", "")
+if not REGION4_NAME:
+    raise RuntimeError("REGION4_NAME environment variable must be set")
+
 NODES: dict[str, dict[str, str | tuple[str, str]]] = {
-    "us-east1": {
+    REGION1_NAME: {
         "base": os.getenv("NODE_US_BASE", "https://orthanc-us:8042"),
         "ae_title": "Orthanc_US",
         "auth": (
@@ -36,7 +49,7 @@ NODES: dict[str, dict[str, str | tuple[str, str]]] = {
             os.getenv("NODE_US_PASS", "orthanc"),
         ),
     },
-    "eu-west1": {
+    REGION2_NAME: {
         "base": os.getenv("NODE_EU_BASE", "https://orthanc-eu:8042"),
         "ae_title": "Orthanc_EU",
         "auth": (
@@ -44,7 +57,7 @@ NODES: dict[str, dict[str, str | tuple[str, str]]] = {
             os.getenv("NODE_EU_PASS", "orthanc"),
         ),
     },
-    "asia-northeast1": {
+    REGION3_NAME: {
         "base": os.getenv("NODE_ASIA_BASE", "https://orthanc-asia:8042"),
         "ae_title": "Orthanc_ASIA",
         "auth": (
@@ -52,7 +65,7 @@ NODES: dict[str, dict[str, str | tuple[str, str]]] = {
             os.getenv("NODE_ASIA_PASS", "orthanc"),
         ),
     },
-    "af-south1": {
+    REGION4_NAME: {
         "base": os.getenv("NODE_AF_BASE", "https://orthanc-af:8042"),
         "ae_title": "Orthanc_AF",
         "auth": (
