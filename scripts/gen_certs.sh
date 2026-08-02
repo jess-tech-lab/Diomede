@@ -138,7 +138,7 @@ sign_cert "orthanc-us"   && echo "[3/8] orthanc-us    done"
 sign_cert "orthanc-eu"   && echo "[4/8] orthanc-eu    done"
 sign_cert "orthanc-asia" && echo "[5/8] orthanc-asia  done"
 sign_cert "orthanc-af"   && echo "[6/8] orthanc-af    done"
-sign_cert "agent-001"    && echo "[7/8] agent-001     done"
+sign_cert "agent-001"   && echo "[7/8] agent-001    done"
 
 # Client cert (clientAuth EKU) — used by simulator scripts to prove
 # identity during DICOM TLS mutual authentication.

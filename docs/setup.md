@@ -366,6 +366,15 @@ On success:
 C-STORE success → Orthanc_US at 127.0.0.1:4242
 ```
 
+Another example is:
+
+```bash
+python -m src.simulator.send_dicom_native \
+  --host 127.0.0.1 \
+  --port 4246 \
+  --called-aet Orthanc_Edge
+```
+
 #### 5b. REST simulator — `send_dicom_rest`
 
 Posts raw DICOM bytes directly to an Orthanc node via `POST /instances` over HTTPS.

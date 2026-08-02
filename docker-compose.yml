@@ -236,16 +236,21 @@ services:
       - orthanc-edge-data:/var/lib/orthanc/db
     environment:
       # EDGE_USER/PASS, NODE_*_BASE/USER/PASS, ORCHESTRATOR_API_KEY,
-      # ORCHESTRATOR_BASE, REGION1_NAME..REGION4_NAME, FORWARDER_POLL_INTERVAL_S,
-      # PROBE_INTERVAL_S, and REQUESTS_CA_BUNDLE come from .env via env_file
-      # above. Only names that differ from their .env property key, or that
-      # are composed from one, need an explicit mapping here:
+      # FORWARDER_POLL_INTERVAL_S, PROBE_INTERVAL_S, and REQUESTS_CA_BUNDLE
+      # come from .env via env_file above. Only names that differ from
+      # their .env property key, or that are composed from one, need an
+      # explicit mapping here:
 
       # This container's own co-located Orthanc.
       EDGE_BASE: "${NODE_INT_BASE}"
 
       # Property key is EDGE_AGENT1; the forwarder code expects AGENT_ID.
       AGENT_ID: "${EDGE_AGENT1}"
+
+      # Orchestrator connection.
+      ORCH_URL: "${ORCHESTRATOR_BASE}/get-best-node"
+      ORCH_HEARTBEAT_URL: "${ORCHESTRATOR_BASE}/heartbeat"
+      REQUESTS_CA_BUNDLE: ${REQUESTS_CA_BUNDLE}
 
     depends_on:
       orchestrator:
