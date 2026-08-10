@@ -124,7 +124,7 @@ class IngestUser(HttpUser):
         if BURST_COUNT and _ingest_sent >= BURST_COUNT:
             return  # burst complete; a quit() is already scheduled
         _ingest_sent += 1  # reserve a slot; check has no yield -> exact count
-        ds = make_sized(FILE_SIZE_KB, random_pixels=True)
+        ds = make_sized(FILE_SIZE_KB)
         buf = io.BytesIO()
         ds.save_as(buf)
         with self.client.post(

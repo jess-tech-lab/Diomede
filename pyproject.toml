@@ -41,6 +41,14 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["."]
 
+# -- Testing -----------------------------------------------------------------
+
+[tool.coverage.run]
+omit = [
+    "*/__init__.py",
+    "src/benchmark/*",  # personal measurement scripts, gitignored, not part of reviewed src
+]
+
 # ── Tooling ──────────────────────────────────────────────────────────────────
 
 [tool.ruff]
