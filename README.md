@@ -33,7 +33,7 @@ Requires Docker Compose v2 and Python 3.12+.
 cp .env.example .env      # set ORTHANC_PASSWORD and ORCHESTRATOR_API_KEY
 
 docker compose up -d orthanc-us orthanc-eu orthanc-asia orthanc-af
-docker compose up -d --build orchestrator edge-agent
+docker compose up -d --build orchestrator agent-001
 
 # Verify all 6 containers are healthy
 docker compose ps

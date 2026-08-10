@@ -22,12 +22,12 @@ def _mock_response(status_code: int, json_body: dict | None = None) -> MagicMock
 
 
 class TestParseArgs:
-    def test_defaults(self):
+    def test_no_fallback_when_env_vars_unset(self):
         with patch("sys.argv", ["send_dicom_rest.py"]), patch.dict("os.environ", {}, clear=True):
             args = _parse_args()
-        assert args.base_url == "https://localhost:8042"
-        assert args.user == "orthanc"
-        assert args.password == "CHANGE_IN_PRODUCTION"
+        assert args.base_url is None
+        assert args.user is None
+        assert args.password is None
         assert args.ca_cert == "certs/ca.pem"
 
     def test_env_var_credentials(self):
@@ -226,4 +226,4 @@ class TestSendBatch:
     def test_uses_make_sized_when_file_size_given(self, _ssl, _send, mock_sized, _sleep):
         send_batch("https://localhost:8042", "orthanc", "pass", "ca.pem", file_size=512)
 
-        mock_sized.assert_called_once_with(512)
+        mock_sized.assert_called_once_with(512, random_pixels=False)

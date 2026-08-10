@@ -17,9 +17,12 @@ import sys
 import time
 
 import httpx
+from dotenv import load_dotenv
 
 from src.simulator.generate_dicom import make_ct_8x8, make_sized
 from src.utils.logging_config import get_logger
+
+load_dotenv()
 
 log = get_logger(__name__, "SIMULATOR")
 
@@ -70,6 +73,7 @@ def send_batch(
     file_size: int | None,
     batch_size: int = 1,
     interval: float = 0.0,
+    random_pixels: bool = False,
 ) -> None:
 
     t0 = time.monotonic()
@@ -77,7 +81,7 @@ def send_batch(
 
     for i in range(batch_size):
         if file_size:
-            ds = make_sized(file_size)
+            ds = make_sized(file_size, random_pixels=random_pixels)
         else:
             ds = make_ct_8x8()
 
@@ -108,19 +112,26 @@ def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Send 8×8 DICOM to an Orthanc node via REST POST /instances"
     )
-    p.add_argument("--base-url", default="https://localhost:8042", help="Orthanc base URL")
     p.add_argument(
-        "--user", default=os.environ.get("ORTHANC_USER", "orthanc"), help="Orthanc username"
+        "--base-url",
+        default=os.environ.get("ORTHANC_BASE_URL"),
+        help="Orthanc base URL",
     )
+    p.add_argument("--user", default=os.environ.get("ORTHANC_USER"), help="Orthanc username")
     p.add_argument(
         "--password",
-        default=os.environ.get("ORTHANC_PASSWORD", "CHANGE_IN_PRODUCTION"),
+        default=os.environ.get("ORTHANC_PASSWORD"),
         help="Orthanc password",
     )
     p.add_argument("--ca-cert", default=_DEFAULT_CA_CERT, help="CA certificate path")
     p.add_argument("--file-size", type=int, default=None, help="Size of file sent in kb")
     p.add_argument("--batch-size", type=int, default=1, help="Number of files sent")
     p.add_argument("--interval", type=float, default=0.0, help="Time to pause in between sends")
+    p.add_argument(
+        "--random-pixels",
+        action="store_true",
+        help="Use random pixel data instead of all-zero bytes",
+    )
     return p.parse_args()
 
 
@@ -134,4 +145,5 @@ if __name__ == "__main__":
         file_size=args.file_size,
         batch_size=args.batch_size,
         interval=args.interval,
+        random_pixels=args.random_pixels,
     )
