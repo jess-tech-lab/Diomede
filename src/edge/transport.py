@@ -10,6 +10,8 @@ existing implementation.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 
 import httpx
 
@@ -27,8 +29,15 @@ class DicomSource(ABC):
         ...
 
     @abstractmethod
-    async def fetch(self, client: httpx.AsyncClient, instance_id: str) -> bytes:
-        """Fetch the raw DICOM bytes for instance_id."""
+    def open_stream(
+        self, client: httpx.AsyncClient, instance_id: str
+    ) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+        """Open a streaming read of instance_id's raw DICOM bytes.
+
+        Returns an async context manager yielding an async byte iterator so the
+        caller can pipe it straight to the destination without ever holding the
+        whole file in memory.
+        """
         ...
 
     @abstractmethod

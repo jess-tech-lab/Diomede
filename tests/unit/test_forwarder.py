@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import pytest
 import respx
@@ -53,11 +55,18 @@ class _StubSource(DicomSource):
     async def poll_new(self, client: AsyncClient) -> list[str]:
         return self.instance_ids
 
-    async def fetch(self, client: AsyncClient, instance_id: str) -> bytes:
+    @asynccontextmanager
+    async def open_stream(
+        self, client: AsyncClient, instance_id: str
+    ) -> AsyncIterator[AsyncIterator[bytes]]:
         if self.fetch_raises:
             raise self.fetch_raises
         self.fetched.append(instance_id)
-        return self.dcm_bytes
+
+        async def _body() -> AsyncIterator[bytes]:
+            yield self.dcm_bytes
+
+        yield _body()
 
     async def acknowledge(self, client: AsyncClient, instance_id: str) -> None:
         if self.ack_raises:
@@ -107,24 +116,26 @@ async def test_poll_new_raises_on_http_error():
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_fetch_returns_dicom_bytes():
+async def test_open_stream_yields_dicom_bytes():
     respx.get(f"{_EDGE_BASE}/instances/abc123/file").mock(
         return_value=Response(200, content=_DCM_BYTES)
     )
     source = OrthancSource(base=_EDGE_BASE)
     async with AsyncClient() as client:
-        data = await source.fetch(client, "abc123")
+        async with source.open_stream(client, "abc123") as body:
+            data = b"".join([chunk async for chunk in body])
     assert data == _DCM_BYTES
 
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_fetch_raises_on_http_error():
+async def test_open_stream_raises_on_http_error():
     respx.get(f"{_EDGE_BASE}/instances/abc123/file").mock(return_value=Response(404))
     source = OrthancSource(base=_EDGE_BASE)
     async with AsyncClient() as client:
         with pytest.raises(HTTPStatusError):
-            await source.fetch(client, "abc123")
+            async with source.open_stream(client, "abc123"):
+                pass
 
 
 @respx.mock
@@ -199,16 +210,22 @@ async def test_route_instance_sets_dicom_content_type(monkeypatch):
 
 @respx.mock
 @pytest.mark.asyncio
-async def test_route_instance_fetch_failure_aborts_early(monkeypatch):
-    """Fetch failure → orchestrator and cloud POST never called."""
+async def test_route_instance_stream_failure_skips_forward(monkeypatch):
+    """A failed edge read (stream open) → no cloud POST and no acknowledge."""
     monkeypatch.setattr(forwarder_module, "ORCH_URL", _ORCH_URL)
-    orch_route = respx.get(_ORCH_URL).mock(return_value=Response(200, json=_BEST_NODE_RESP))
+    monkeypatch.setattr(
+        forwarder_module,
+        "CLOUD_NODES",
+        {"us-east1": {"base": "http://orthanc-us:8042", "auth": ("orthanc", "orthanc")}},
+    )
+    respx.get(_ORCH_URL).mock(return_value=Response(200, json=_BEST_NODE_RESP))
+    post_route = respx.post("http://orthanc-us:8042/instances").mock(return_value=Response(200))
 
     source = _StubSource(fetch_raises=ConnectError("timeout"))
     async with AsyncClient() as client:
         await route_instance(client, source, "abc123")
 
-    assert not orch_route.called
+    assert not post_route.called
     assert source.acknowledged == []
 
 
@@ -301,12 +318,11 @@ async def test_latency_probe_reports_rtt_for_all_nodes(monkeypatch):
         respx.get(f"{cfg['base']}/system").mock(return_value=Response(200, json={}))
     hb_route = respx.post(_ORCH_HB_URL).mock(return_value=Response(204))
 
-    async with AsyncClient() as client:
-        task = asyncio.create_task(forwarder_module.latency_probe_loop(client))
-        await asyncio.sleep(0.1)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+    task = asyncio.create_task(forwarder_module.latency_probe_loop())
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
     assert hb_route.call_count >= 1
     payload = hb_route.calls[0].request
@@ -333,12 +349,11 @@ async def test_latency_probe_skips_failed_node_and_continues(monkeypatch):
 
     hb_route = respx.post(_ORCH_HB_URL).mock(return_value=Response(204))
 
-    async with AsyncClient() as client:
-        task = asyncio.create_task(forwarder_module.latency_probe_loop(client))
-        await asyncio.sleep(0.1)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
+    task = asyncio.create_task(forwarder_module.latency_probe_loop())
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
     assert hb_route.call_count >= 1
     import json
