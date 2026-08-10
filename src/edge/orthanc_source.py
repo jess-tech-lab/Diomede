@@ -7,20 +7,18 @@ GET /instances/{id}/file, and acknowledges by deleting the local copy.
 
 from __future__ import annotations
 
-import os
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-
 import httpx
+from dotenv import load_dotenv
 
 from src.edge.transport import DicomSource
+from src.utils.env import require_env
 from src.utils.logging_config import get_logger
 
 log = get_logger(__name__, "ORTHANC_SOURCE")
+load_dotenv()
 
-_EDGE_BASE = os.getenv("EDGE_BASE", "http://localhost:8042")
-_EDGE_AUTH = (os.getenv("EDGE_USER", "orthanc"), os.getenv("EDGE_PASS", "orthanc"))
-_CA_CERT = os.getenv("REQUESTS_CA_BUNDLE", "")
+_EDGE_BASE = require_env("EDGE_BASE")
+_EDGE_AUTH = (require_env("EDGE_USER"), require_env("EDGE_PASS"))
 
 
 class OrthancSource(DicomSource):

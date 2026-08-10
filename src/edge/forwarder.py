@@ -6,20 +6,24 @@ import time
 from typing import TypedDict
 
 import httpx
+from dotenv import load_dotenv
 
 from src.edge.orthanc_source import OrthancSource
 from src.edge.transport import DicomSource
+from src.utils.env import require_env
 from src.utils.logging_config import get_logger
 
 log = get_logger(__name__, "FORWARDER")
+load_dotenv()
 
-ORCH_URL = os.getenv("ORCH_URL", "http://orchestrator:8000/get-best-node")
-ORCH_HEARTBEAT_URL = os.getenv("ORCH_HEARTBEAT_URL", "http://orchestrator:8000/heartbeat")
-ORCH_API_KEY = os.getenv("ORCHESTRATOR_API_KEY", "")
-POLL_INTERVAL_S = int(os.getenv("POLL_INTERVAL_S", "5"))
-PROBE_INTERVAL_S = int(os.getenv("PROBE_INTERVAL_S", "3600"))
-CA_CERT = os.getenv("REQUESTS_CA_BUNDLE", "")
-_VERIFY: str | bool = CA_CERT if CA_CERT else True
+ORCHESTRATOR_BASE = require_env("ORCHESTRATOR_BASE")
+ORCH_URL = f"{ORCHESTRATOR_BASE}/get-best-node"
+ORCH_HEARTBEAT_URL = f"{ORCHESTRATOR_BASE}/heartbeat"
+ORCH_API_KEY = require_env("ORCHESTRATOR_API_KEY")
+AGENT_ID = require_env("AGENT_ID")
+POLL_INTERVAL_S = int(require_env("FORWARDER_POLL_INTERVAL_S"))
+PROBE_INTERVAL_S = int(require_env("PROBE_INTERVAL_S"))
+CA_CERT = os.getenv("REQUESTS_CA_BUNDLE")
 
 
 class _NodeCfg(TypedDict):
@@ -28,27 +32,27 @@ class _NodeCfg(TypedDict):
 
 
 CLOUD_NODES: dict[str, _NodeCfg] = {
-    "us-east1": {
-        "base": os.getenv("NODE_US_BASE", "http://orthanc-us:8042"),
-        "auth": (os.getenv("NODE_US_USER", "orthanc"), os.getenv("NODE_US_PASS", "orthanc")),
+    require_env("REGION1_NAME"): {
+        "base": require_env("NODE_US_BASE"),
+        "auth": (require_env("NODE_US_USER"), require_env("NODE_US_PASS")),
     },
-    "eu-west1": {
-        "base": os.getenv("NODE_EU_BASE", "http://orthanc-eu:8042"),
-        "auth": (os.getenv("NODE_EU_USER", "orthanc"), os.getenv("NODE_EU_PASS", "orthanc")),
+    require_env("REGION2_NAME"): {
+        "base": require_env("NODE_EU_BASE"),
+        "auth": (require_env("NODE_EU_USER"), require_env("NODE_EU_PASS")),
     },
-    "asia-northeast1": {
-        "base": os.getenv("NODE_ASIA_BASE", "http://orthanc-asia:8042"),
-        "auth": (os.getenv("NODE_ASIA_USER", "orthanc"), os.getenv("NODE_ASIA_PASS", "orthanc")),
+    require_env("REGION3_NAME"): {
+        "base": require_env("NODE_ASIA_BASE"),
+        "auth": (require_env("NODE_ASIA_USER"), require_env("NODE_ASIA_PASS")),
     },
-    "af-south1": {
-        "base": os.getenv("NODE_AF_BASE", "http://orthanc-af:8042"),
-        "auth": (os.getenv("NODE_AF_USER", "orthanc"), os.getenv("NODE_AF_PASS", "orthanc")),
+    require_env("REGION4_NAME"): {
+        "base": require_env("NODE_AF_BASE"),
+        "auth": (require_env("NODE_AF_USER"), require_env("NODE_AF_PASS")),
     },
 }
 
 
 def _orch_headers() -> dict[str, str]:
-    return {"X-API-Key": ORCH_API_KEY} if ORCH_API_KEY else {}
+    return {"X-API-Key": ORCH_API_KEY}
 
 
 async def route_instance(
@@ -61,7 +65,7 @@ async def route_instance(
     # 1. Ask the Orchestrator for the best destination (before downloading anything).
     try:
         best_resp = await client.get(
-            ORCH_URL, params={"agent_id": os.getenv("AGENT_ID")}, headers=_orch_headers(), timeout=5
+            ORCH_URL, params={"agent_id": AGENT_ID}, headers=_orch_headers(), timeout=5
         )
         best_resp.raise_for_status()
         best = best_resp.json()
@@ -121,30 +125,29 @@ async def latency_probe_loop() -> None:
     """GET /system on each cloud node once per hour, report RTT to /heartbeat."""
     while True:
         rtt_dict: dict[str, float] = {}
-        async with httpx.AsyncClient(verify=_VERIFY) as client:
-            for node_id, cfg in CLOUD_NODES.items():
-                base = cfg["base"]
-                auth = cfg["auth"]
-                try:
-                    t0 = time.monotonic()
-                    resp = await client.get(f"{base}/system", auth=auth, timeout=10)
-                    rtt_ms = (time.monotonic() - t0) * 1000
-                    resp.raise_for_status()
-                    rtt_dict[node_id] = round(rtt_ms, 1)
-                    log.info("node=%-15s rtt=%.1f ms", node_id, rtt_ms)
-                except Exception as exc:
-                    log.warning("node=%-15s probe failed: %s", node_id, exc)
+        for node_id, cfg in CLOUD_NODES.items():
+            base = cfg["base"]
+            auth = cfg["auth"]
+            try:
+                t0 = time.monotonic()
+                resp = await client.get(f"{base}/system", auth=auth, timeout=10)
+                rtt_ms = (time.monotonic() - t0) * 1000
+                resp.raise_for_status()
+                rtt_dict[node_id] = round(rtt_ms, 1)
+                log.info("node=%-15s rtt=%.1f ms", node_id, rtt_ms)
+            except Exception as exc:
+                log.warning("node=%-15s probe failed: %s", node_id, exc)
 
-            if rtt_dict:
-                try:
-                    await client.post(
-                        ORCH_HEARTBEAT_URL,
-                        json={"agent_id": os.getenv("AGENT_ID"), "rtt_dict": rtt_dict},
-                        headers=_orch_headers(),
-                        timeout=5,
-                    )
-                except Exception as exc:
-                    log.warning("heartbeat failed: %s", exc)
+        if rtt_dict:
+            try:
+                await client.post(
+                    ORCH_HEARTBEAT_URL,
+                    json={"agent_id": AGENT_ID, "rtt_dict": rtt_dict},
+                    headers=_orch_headers(),
+                    timeout=5,
+                )
+            except Exception as exc:
+                log.warning("heartbeat failed: %s", exc)
 
         await asyncio.sleep(PROBE_INTERVAL_S)
 
