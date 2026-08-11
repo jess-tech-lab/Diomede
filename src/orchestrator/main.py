@@ -8,16 +8,17 @@ Exposes a single endpoint that reads the latest node telemetry from Redis
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import redis.asyncio as aioredis
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, field_validator
 
+from src.utils.env import require_env
 from src.utils.logging_config import get_logger
 
 from .daemon import NODES
@@ -25,12 +26,11 @@ from .scorer import get_scorer
 from .weighted_scorer import WeightedScorer  # noqa: F401 to trigger self-registration
 
 log = get_logger(__name__, "ORCHESTRATOR")
+load_dotenv()
 
 API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
-API_KEY = os.getenv("ORCHESTRATOR_API_KEY")
-if not API_KEY:
-    raise RuntimeError("ORCHESTRATOR_API_KEY environment variable must be set")
+API_KEY = require_env("ORCHESTRATOR_API_KEY")
 
 _rtt_cache: dict[str, dict[str, float]] = {}
 
@@ -83,7 +83,7 @@ class HeartbeatPayload(BaseModel):
         return v
 
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+REDIS_URL = require_env("REDIS_URL")
 
 
 @asynccontextmanager
@@ -140,11 +140,17 @@ async def get_best_node(
     if not healthy:
         raise HTTPException(status_code=503, detail="No healthy nodes available")
 
-    agent_rtt = _rtt_cache.get(agent_id)
-    log.info(f"THIS IS agent_rtt: {agent_rtt}")
-    if agent_rtt is None:
-        log.warning(f"Invalid agent_id: {agent_id}")
-        raise HTTPException(status_code=400, detail=f"Invalid agent_id={agent_id}")
+    agent_rtt: dict[str, float] | None = None
+    if not _rtt_cache:
+        log.warning("No RTT cache found; falling back to default scoring")
+        agent_rtt = {}
+    else:
+        agent_rtt = _rtt_cache.get(agent_id)
+        if agent_rtt is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid agent: {agent_id}",
+            )
 
     for node in healthy:
         rtt = agent_rtt.get(node["node_id"])

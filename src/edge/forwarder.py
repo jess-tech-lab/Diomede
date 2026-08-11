@@ -6,19 +6,24 @@ import time
 from typing import TypedDict
 
 import httpx
+from dotenv import load_dotenv
 
 from src.edge.orthanc_source import OrthancSource
 from src.edge.transport import DicomSource
+from src.utils.env import require_env
 from src.utils.logging_config import get_logger
 
 log = get_logger(__name__, "FORWARDER")
+load_dotenv()
 
-ORCH_URL = os.getenv("ORCH_URL", "http://orchestrator:8000/get-best-node")
-ORCH_HEARTBEAT_URL = os.getenv("ORCH_HEARTBEAT_URL", "http://orchestrator:8000/heartbeat")
-ORCH_API_KEY = os.getenv("ORCHESTRATOR_API_KEY", "")
-POLL_INTERVAL_S = int(os.getenv("POLL_INTERVAL_S", "5"))
-PROBE_INTERVAL_S = int(os.getenv("PROBE_INTERVAL_S", "3600"))
-CA_CERT = os.getenv("REQUESTS_CA_BUNDLE", "")
+ORCHESTRATOR_BASE = require_env("ORCHESTRATOR_BASE")
+ORCH_URL = f"{ORCHESTRATOR_BASE}/get-best-node"
+ORCH_HEARTBEAT_URL = f"{ORCHESTRATOR_BASE}/heartbeat"
+ORCH_API_KEY = require_env("ORCHESTRATOR_API_KEY")
+AGENT_ID = require_env("AGENT_ID")
+POLL_INTERVAL_S = int(require_env("FORWARDER_POLL_INTERVAL_S"))
+PROBE_INTERVAL_S = int(require_env("PROBE_INTERVAL_S"))
+CA_CERT = os.getenv("REQUESTS_CA_BUNDLE")
 
 
 class _NodeCfg(TypedDict):
@@ -27,27 +32,27 @@ class _NodeCfg(TypedDict):
 
 
 CLOUD_NODES: dict[str, _NodeCfg] = {
-    "us-east1": {
-        "base": os.getenv("NODE_US_BASE", "http://orthanc-us:8042"),
-        "auth": (os.getenv("NODE_US_USER", "orthanc"), os.getenv("NODE_US_PASS", "orthanc")),
+    require_env("REGION1_NAME"): {
+        "base": require_env("NODE_US_BASE"),
+        "auth": (require_env("NODE_US_USER"), require_env("NODE_US_PASS")),
     },
-    "eu-west1": {
-        "base": os.getenv("NODE_EU_BASE", "http://orthanc-eu:8042"),
-        "auth": (os.getenv("NODE_EU_USER", "orthanc"), os.getenv("NODE_EU_PASS", "orthanc")),
+    require_env("REGION2_NAME"): {
+        "base": require_env("NODE_EU_BASE"),
+        "auth": (require_env("NODE_EU_USER"), require_env("NODE_EU_PASS")),
     },
-    "asia-northeast1": {
-        "base": os.getenv("NODE_ASIA_BASE", "http://orthanc-asia:8042"),
-        "auth": (os.getenv("NODE_ASIA_USER", "orthanc"), os.getenv("NODE_ASIA_PASS", "orthanc")),
+    require_env("REGION3_NAME"): {
+        "base": require_env("NODE_ASIA_BASE"),
+        "auth": (require_env("NODE_ASIA_USER"), require_env("NODE_ASIA_PASS")),
     },
-    "af-south1": {
-        "base": os.getenv("NODE_AF_BASE", "http://orthanc-af:8042"),
-        "auth": (os.getenv("NODE_AF_USER", "orthanc"), os.getenv("NODE_AF_PASS", "orthanc")),
+    require_env("REGION4_NAME"): {
+        "base": require_env("NODE_AF_BASE"),
+        "auth": (require_env("NODE_AF_USER"), require_env("NODE_AF_PASS")),
     },
 }
 
 
 def _orch_headers() -> dict[str, str]:
-    return {"X-API-Key": ORCH_API_KEY} if ORCH_API_KEY else {}
+    return {"X-API-Key": ORCH_API_KEY}
 
 
 async def route_instance(
@@ -67,7 +72,7 @@ async def route_instance(
     # 2. Ask the Orchestrator for the best destination.
     try:
         best_resp = await client.get(
-            ORCH_URL, params={"agent_id": os.getenv("AGENT_ID")}, headers=_orch_headers(), timeout=5
+            ORCH_URL, params={"agent_id": AGENT_ID}, headers=_orch_headers(), timeout=5
         )
         best_resp.raise_for_status()
         best = best_resp.json()
@@ -141,7 +146,7 @@ async def latency_probe_loop(client: httpx.AsyncClient) -> None:
             try:
                 await client.post(
                     ORCH_HEARTBEAT_URL,
-                    json={"agent_id": os.getenv("AGENT_ID"), "rtt_dict": rtt_dict},
+                    json={"agent_id": AGENT_ID, "rtt_dict": rtt_dict},
                     headers=_orch_headers(),
                     timeout=5,
                 )
