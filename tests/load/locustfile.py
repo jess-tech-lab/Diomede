@@ -21,9 +21,11 @@ from __future__ import annotations
 
 import io
 import os
+import time
 from pathlib import Path
 
 import gevent
+import httpx
 from dotenv import load_dotenv
 from locust import HttpUser, between, events, task
 
@@ -32,28 +34,31 @@ from src.simulator.generate_dicom import make_sized
 load_dotenv(override=True)
 
 # --- Targets and credentials (host-facing; the simulator runs outside docker) ---
-ORCH_URL = os.environ.get("ORCHESTRATOR_HTTPS_URL", "https://localhost:8000")
-EDGE_URL = os.environ.get("EDGE_AGENT1_HTTPS_URL", "https://localhost:8046")
-API_KEY = os.environ.get("ORCHESTRATOR_API_KEY", "")
-AGENT_ID = os.environ.get("EDGE_AGENT1", "agent-001")
+ORCH_URL = os.environ.get("ORCHESTRATOR_HTTPS_URL")
+EDGE_URL = os.environ.get("EDGE_AGENT1_HTTPS_URL")
+API_KEY = os.environ.get("ORCHESTRATOR_API_KEY")
+AGENT_ID = os.environ.get("EDGE_AGENT1")
 EDGE_AUTH = (
-    os.environ.get("ORTHANC_USER", "orthanc"),
-    os.environ.get("ORTHANC_PASSWORD", "orthanc"),
+    os.environ.get("ORTHANC_USER"),
+    os.environ.get("ORTHANC_PASSWORD"),
 )
-FILE_SIZE_KB = int(os.environ.get("LOAD_FILE_SIZE_KB", "50"))
-# Stop IngestUser after this many POSTs (the "100-image burst"); 0 = run until
-# --run-time. Locust has no --iterations flag, so the burst is bounded here.
-BURST_COUNT = int(os.environ.get("LOAD_BURST_COUNT", "0"))
+FILE_SIZE_KB = int(os.environ.get("LOAD_FILE_SIZE_KB"))
+BURST_COUNT = int(os.environ.get("LOAD_BURST_COUNT"))
+LOAD_MIN_INTERVAL = float(os.environ.get("LOAD_MIN_INTERVAL"))
+LOAD_MAX_INTERVAL = float(os.environ.get("LOAD_MAX_INTERVAL"))
 _ingest_sent = 0
 
 # --- KPI thresholds (Section 7.1); override via env for experimentation ---
-MAX_P99_MS = float(os.environ.get("LOAD_MAX_P99_MS", "50"))
-MAX_FAIL_RATIO = float(os.environ.get("LOAD_MAX_FAIL_RATIO", "0.005"))
+MAX_P99_MS = float(os.environ.get("LOAD_MAX_P99_MS"))
+MAX_FAIL_RATIO = float(os.environ.get("LOAD_MAX_FAIL_RATIO"))
 
 # Stable stat names so the KPI check can find each endpoint whether the scenarios
 # run alone or together.
 _ROUTE_NAME = "GET /get-best-node"
 _INGEST_NAME = "POST /instances"
+
+DRAIN_POLL_INTERVAL_S = float(os.environ.get("LOAD_DRAIN_POLL_INTERVAL_S", "1"))
+DRAIN_TIMEOUT_S = float(os.environ.get("LOAD_DRAIN_TIMEOUT_S", "5"))
 
 
 def _tls_verify() -> str | bool:
@@ -79,7 +84,7 @@ class RoutingUser(HttpUser):
     """Hammer the orchestrator routing decision path (control-plane latency KPI)."""
 
     host = ORCH_URL
-    wait_time = between(0, 0.05)
+    wait_time = between(LOAD_MIN_INTERVAL, LOAD_MAX_INTERVAL)
 
     def on_start(self) -> None:
         self.client.verify = _VERIFY
@@ -104,15 +109,10 @@ class RoutingUser(HttpUser):
 
 
 class IngestUser(HttpUser):
-    """Post synthetic DICOM to the edge Orthanc (data-plane success-rate KPI).
-
-    Success here means the edge accepted the instance (client -> edge buffering).
-    True end-to-end delivery (edge -> cloud node) is measured separately by
-    src/benchmark/success_rate.py, which polls the cloud nodes for arrivals.
-    """
+    """Post synthetic DICOM to the edge Orthanc (data-plane success-rate KPI)."""
 
     host = EDGE_URL
-    wait_time = between(0, 0.05)
+    wait_time = between(LOAD_MIN_INTERVAL, LOAD_MAX_INTERVAL)
 
     def on_start(self) -> None:
         self.client.verify = _VERIFY
@@ -144,6 +144,26 @@ class IngestUser(HttpUser):
             gevent.spawn_later(0, self.environment.runner.quit)
 
 
+def _wait_for_edge_drain() -> int | None:
+    """Poll the edge Orthanc's instance list until it's empty or DRAIN_TIMEOUT_S
+    elapses. Returns the count still stuck (0 = fully drained), or None if the
+    edge couldn't be reached at all."""
+    deadline = time.monotonic() + DRAIN_TIMEOUT_S
+    count: int | None = None
+    with httpx.Client(base_url=EDGE_URL, auth=EDGE_AUTH, verify=_VERIFY) as client:
+        while True:
+            try:
+                resp = client.get("/instances", timeout=10)
+                resp.raise_for_status()
+                count = len(resp.json())
+            except Exception as exc:
+                print(f"[KPI] drain check: edge poll failed: {exc}")
+                count = None
+            if count == 0 or time.monotonic() >= deadline:
+                return count
+            gevent.sleep(DRAIN_POLL_INTERVAL_S)
+
+
 @events.test_start.add_listener
 def _reset_burst(environment, **_kwargs) -> None:
     """Reset the burst counter so repeated runs in one process (web UI) start fresh."""
@@ -168,7 +188,16 @@ def _check_kpis(environment, **_kwargs) -> None:
 
     ingest = stats.get(_INGEST_NAME, "POST")
     if ingest.num_requests:
-        ratio = ingest.num_failures / ingest.num_requests
+        accepted = ingest.num_requests - ingest.num_failures
+        stuck = _wait_for_edge_drain()
+        if stuck > accepted:
+            print(
+                f"[KPI] drain check: {stuck} instance(s) left on edge but only "
+                f"{accepted} were accepted this run -- edge buffer had leftovers "
+                f"from before this burst started"
+            )
+        delivered = max(accepted - stuck, 0)
+        ratio = (ingest.num_requests - delivered) / ingest.num_requestss
         verdict = "PASS" if ratio <= MAX_FAIL_RATIO else "FAIL"
         if ratio > MAX_FAIL_RATIO:
             failures.append(f"ingest failure ratio {ratio:.4f} > {MAX_FAIL_RATIO:.4f}")
