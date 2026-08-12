@@ -1,11 +1,14 @@
 """
 edge/orthanc_source.py – DicomSource backed by the Edge Orthanc REST API.
 
-Polls GET /instances for NewInstance events, fetches raw DICOM bytes via
+Polls GET /instances for NewInstance events, streams raw DICOM bytes via
 GET /instances/{id}/file, and acknowledges by deleting the local copy.
 """
 
 from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 from dotenv import load_dotenv
@@ -45,15 +48,23 @@ class OrthancSource(DicomSource):
         list_response: list[str] = resp.json()
         return list_response
 
-    async def fetch(self, client: httpx.AsyncClient, instance_id: str) -> bytes:
-        """Download raw DICOM bytes for instance_id from Edge Orthanc."""
-        resp = await client.get(
+    @asynccontextmanager
+    async def open_stream(
+        self, client: httpx.AsyncClient, instance_id: str
+    ) -> AsyncIterator[AsyncIterator[bytes]]:
+        """Stream raw DICOM bytes for instance_id from Edge Orthanc.
+
+        Uses httpx streaming so the file is never fully buffered in memory -- the
+        caller pipes the yielded iterator straight to the destination node.
+        """
+        async with client.stream(
+            "GET",
             f"{self._base}/instances/{instance_id}/file",
             auth=self._auth,
             timeout=60,
-        )
-        resp.raise_for_status()
-        return bytes(resp.content)
+        ) as resp:
+            resp.raise_for_status()
+            yield resp.aiter_bytes()
 
     async def acknowledge(self, client: httpx.AsyncClient, instance_id: str) -> None:
         """Delete the instance from Edge Orthanc to prevent disk fill."""
