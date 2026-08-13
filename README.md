@@ -21,52 +21,98 @@ the **Orchestrator** for the lowest-cost cloud node and posts the bytes there
 directly. The Orchestrator scores all nodes registered in Redis and
 automatically excludes any node whose heartbeat TTL has expired.
 
-[Full architecture](docs/architecture.md)
+---
+
+## Where to start
+
+Follow in this order:
+
+1. **This README** — what Diomede is.
+2. **[Setup guide](docs/setup.md)** — the full, step-by-step walkthrough.
+3. **[Architecture](docs/architecture.md)** — how it works internally: the routing
+   lifecycle, scoring algorithm, and dead-node detection.
+4. **[Contributing](CONTRIBUTING.md)** — branch/PR workflow, pre-commit hooks, and
+   test strategy.
+
+---
+
+## Repository layout
+
+| Path | What lives here |
+|---|---|
+| `src/orchestrator/` | FastAPI orchestrator (`main.py`), Telemetry Daemon (`daemon.py`), pluggable scorer (`scorer.py`, `weighted_scorer.py`) |
+| `src/edge/` | Forwarder Daemon (`forwarder.py`), polls the edge Orthanc and routes new instances |
+| `src/simulator/` | Synthetic DICOM senders (`send_dicom_native.py`, `send_dicom_rest.py`) and generator (`generate_dicom.py`) |
+| `src/utils/` | Shared helpers (logging config, etc.) |
+| `config/` | Container build context: `Dockerfile`s, `start.sh` entrypoints, and Orthanc config templates (`config/orthanc/*.template.json`) |
+| `scripts/` | `gen_certs.sh` (TLS CA + per-node certs) and `inject_latency.sh` (WAN latency simulation) |
+| `tests/` | `unit/`, `integration/`, `load/`|
+| `docs/` | `setup.md`, `architecture.md`, and diagrams |
 
 ---
 
 ## Quick start
 
-Requires Docker Compose v2 and Python 3.12+.
+**Requires** Docker Compose v2 and Python 3.12+.
 
 ```bash
-cp .env.example .env      # set ORTHANC_PASSWORD and ORCHESTRATOR_API_KEY
+# 1. Configuration, copy the template
+cp .env.example .env
+#    then edit .env and replace every CHANGE_IN_PRODUCTION
+#    (ORTHANC_PASSWORD and ORCHESTRATOR_API_KEY)
 
+# 2. TLS, every REST/DICOM link runs over TLS, so generate the CA + node certs first
+bash scripts/gen_certs.sh
+
+# 3. Start the 4 regional Orthanc nodes (pre-built image), wait until healthy
 docker compose up -d orthanc-us orthanc-eu orthanc-asia orthanc-af
-docker compose up -d --build orchestrator edge-agent
-
-# Verify all 6 containers are healthy
 docker compose ps
 
-# Ask the Orchestrator for the best node
-curl -s http://localhost:8000/get-best-node \
-  -H "X-API-Key: <your_api_key>" | python3 -m json.tool
+# 4. Build and start the orchestrator + edge agent (local Dockerfiles)
+docker compose up -d --build orchestrator edge-agent
+
+# 5. Verify all 6 containers healthy, then ask the orchestrator for the best node
+docker compose ps
+curl -k -H "X-API-Key: <your_api_key>" \
+  "https://localhost:8000/get-best-node?agent_id=agent-001" | python3 -m json.tool
 ```
 
-[Full setup guide](docs/setup.md) — latency injection, failover testing,
-load testing, Orthanc web UIs, troubleshooting
+> The orchestrator serves **HTTPS** with a self-signed cert, so `-k` skips
+> hostname verification for local calls. All endpoints require the `X-API-Key`
+> header matching `ORCHESTRATOR_API_KEY` in your `.env`.
+
+Full walkthrough, including sending test DICOM studies, WAN latency injection,
+and failover testing, is in the **[setup guide](docs/setup.md)**.
 
 ---
 
 ## Development
 
+Unit tests and linting run entirely on your host.
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[orchestrator,test,dev]"
+pip install -e ".[orchestrator,edge,scripts,test,dev]"   # add ,load for load tests
 
-# Unit tests (no Docker required)
+# Unit tests
 python -m pytest tests/unit/ -v -m unit --cov=src --cov-fail-under=80
 
-# Linting and type checks
+# Lint + format check
 ruff check src/
+ruff format --check src/
+
+# Type check — each service dir is checked from inside it, mirroring runtime imports
 for src_dir in src/orchestrator src/edge src/simulator; do
   (cd "$src_dir" && mypy .)
 done
-
 ```
 
-[Contributing](CONTRIBUTING.md) — pre-commit hooks, integration tests,
-scoring weight tuning
+Integration tests (`pytest tests/integration/ -v -m integration`) require the full
+stack to be running. The orchestrator and edge images **bake in** `src/`, so after
+editing that code rebuild the affected container:
+`docker compose up -d --build orchestrator edge-agent`.
+
+See **[Contributing](CONTRIBUTING.md)** for pre-commit hooks and scoring-weight tuning.
 
 ---
 
@@ -74,8 +120,6 @@ scoring weight tuning
 
 | Document | Description |
 |---|---|
-| [Architecture](docs/architecture.md) | System design, routing lifecycle, scoring algorithm, dead-node detection |
-| [Setup guide](docs/setup.md) | Full Docker environment, WAN latency simulation, failover and load testing |
+| [Setup guide](docs/setup.md) | Fresh-clone → running stack, test transfers, WAN latency, failover, tests |
+| [Architecture](docs/architecture.md) | System design, routing lifecycle, scoring algorithm, dead-node detection, security |
 | [Contributing](CONTRIBUTING.md) | Development workflow, pre-commit hooks, test strategy |
-
----

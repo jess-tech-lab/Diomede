@@ -1,160 +1,103 @@
-# Diomede Dynamic DICOM Endpoints – Local Test Environment
+# Setup Guide — Local Test Environment
 
-This document walks through spinning up the full 6-container simulation
-environment so you can:
+This guide takes you from a **fresh clone** to a live 6-container Diomede
+environment, then through sending real DICOM studies, simulating WAN latency,
+watching a failover, and running the test suite.
 
-- Run all the code snippets against live Orthanc instances
+Follow the steps in order — each one builds on the previous. By the end you can:
+
+- Run every code snippet against live Orthanc instances
 - Watch routing decisions happen in real time
 - Kill a node mid-transfer to verify failover
 - Inject realistic WAN latency with `tc netem`
 
 ---
 
-## Container Topology
+## Topology
 
-| Container | Role | Host Ports |
+| Container | Role | Host ports (REST · DICOM) |
 |---|---|---|
-| `orthanc-us` | Cloud PACS node (GCP us-east1) | REST 8042 · DICOM 4242 |
-| `orthanc-eu` | Cloud PACS node (GCP eu-west1) | REST 8043 · DICOM 4243 |
-| `orthanc-asia` | Cloud PACS node (GCP asia-northeast1) | REST 8044 · DICOM 4244 |
-| `orthanc-af` | Cloud PACS node (GCP af-south1) | REST 8045 · DICOM 4245 |
+| `orthanc-us` | Cloud PACS node (GCP us-east1) | 8042 · 4242 |
+| `orthanc-eu` | Cloud PACS node (GCP eu-west1) | 8043 · 4243 |
+| `orthanc-asia` | Cloud PACS node (GCP asia-northeast1) | 8044 · 4244 |
+| `orthanc-af` | Cloud PACS node (GCP af-south1) | 8045 · 4245 |
 | `orchestrator` | Redis + Telemetry Daemon + FastAPI (co-located) | 8000 |
-| `edge-agent` | Edge Orthanc + Forwarder Daemon (co-located) | REST 8046 · DICOM 4246 |
+| `edge-agent` | Edge Orthanc + Forwarder Daemon (co-located) | 8046 · 4246 |
 
-The **Orchestrator container** runs three co-located processes, mirroring the
+The **orchestrator container** runs three co-located processes, mirroring the
 production VM where all three always live on the same host:
 
-- `redis-server` – node registry; keys have 30 s TTL (expired key = dead node),
-  bound to `127.0.0.1` inside the container only
-- `daemon.py` – async Telemetry Daemon; polls all four cloud Orthanc nodes every
-  10 s and writes JSON heartbeats to Redis over `localhost`
-- `main.py` (via `uvicorn`) – FastAPI Orchestrator; reads Redis over `localhost`
-  and serves `GET /get-best-node`, `POST /heartbeat`, `GET /nodes`
+- `redis-server` — node registry; keys have a **30 s TTL** (an expired key means a
+  dead node), bound to `127.0.0.1` inside the container only.
+- `daemon.py` — async Telemetry Daemon; polls all four cloud Orthanc nodes **every
+  10 s** and writes JSON heartbeats to Redis over `localhost`.
+- `main.py` (via `uvicorn`) — FastAPI Orchestrator; reads Redis over `localhost`
+  and serves `GET /get-best-node`, `POST /heartbeat`, `GET /nodes` over HTTPS.
 
-The **Edge Agent** is a single container (`edge-agent`) running two co-located
-processes, which has the same pattern as the Orchestrator container:
+The **edge agent** is a single container running two co-located processes,
+following the same pattern:
 
-- **Edge Orthanc** - standard Orthanc PACS; legacy scanners (or the simulator
-  script) send DICOM C-STORE here on port 4246
-- **Forwarder Daemon** - polls Orthanc's `/changes` every 5 s on `localhost:8042`,
-  downloads new instances, queries the Orchestrator, and forwards to the winning
-  cloud node
+- **Edge Orthanc** — standard Orthanc PACS; legacy scanners (or the simulator
+  scripts) send DICOM C-STORE here on port 4246.
+- **Forwarder Daemon** (`forwarder.py`) — polls Orthanc's `/changes` every 5 s on
+  `localhost:8042`, downloads new instances, queries the Orchestrator, forwards to
+  the winning cloud node, and deletes the local copy. It also probes each cloud
+  node's RTT **once per hour** and reports it via `POST /heartbeat`.
 
-They share the same network namespace so the Forwarder talks to Orthanc on
-`localhost` with zero network hop. This mirrors the production edge VM where
-both processes run on the same host and simplifies the security boundary.
-
----
-
-## Prerequisites
-
-- Docker Desktop ≥ 4.x (Mac/Windows) **or** Docker Engine + Compose plugin (Linux)
-- `docker compose version` should print `v2.x`
-- Python 3.12 or 3.13 on your host
+Both processes in a container share one network namespace, so they talk to their
+co-located Orthanc on `localhost` with zero network hops — mirroring the
+production VMs.
 
 ---
 
-## Local Development Setup
+## Step 1 — Prerequisites
 
-Unit tests run entirely on your host and no Docker is required.  Integration tests
-require the full Docker stack (see Quick Start below).
+- Docker Desktop ≥ 4.x (macOS/Windows) **or** Docker Engine + Compose plugin (Linux).
+  `docker compose version` should print `v2.x`.
+- Python 3.12+ on your host.
+- `git`, `bash`, and `openssl` (already present on macOS/Linux).
 
-### 1. Create a virtual environment
+## Step 2 — Clone the repository
+
+```bash
+git clone https://github.com/KathiraveluLab/Diomede.git
+cd Diomede
+```
+
+## Step 3 — Create the Python environment
+
+Unit tests, linting, and the simulator scripts run from your host, so set up a
+virtual environment and install the package in editable mode.
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-```
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-### 2. Install all dependencies
-
-```bash
 pip install -e ".[orchestrator,edge,scripts,test,dev]"
 ```
 
-The `-e` flag installs the package so Python imports resolve directly from your working directory so edits to source files take effect immediately without reinstalling. The groups after the dot pull in optional dependencies:
-- `orchestrator` - fastapi, uvicorn, redis, httpx, pydantic
-- `edge` - httpx
-- `scripts` - httpx, pydicom (for `src/simulator/send_test_dicom.py`)
-- `test` - pytest, fakeredis, respx, pytest-cov, and friends
-- `dev` - ruff, mypy, types-redis, pre-commit
+The `-e` (editable) flag installs the package so Python imports resolve directly
+from your working directory — edits to source files take effect immediately
+without reinstalling. The groups after the dot pull in optional dependencies:
 
+- `orchestrator` — fastapi, uvicorn, redis, httpx, pydantic
+- `edge` — httpx
+- `scripts` — httpx, pydicom, pynetdicom, python-dotenv (for the simulator scripts)
+- `test` — pytest, fakeredis, respx, pytest-cov, and friends
+- `dev` — ruff, mypy, types-redis, pre-commit
+- `load` — locust (add `,load` if you plan to run the load tests in Step 11)
 
-### 3. Verify the Telemetry Daemon
+## Step 4 — Configure `.env`
 
-Iterate through all nodes to see the values stored in Redis of the Orchestrator
-```bash
-for node in us-east1 eu-west1 asia-northeast1 af-south1; do
-  echo "============ $node ==============="
-  docker compose exec orchestrator redis-cli GET node:$node | python3 -m json.tool
-done
-```
-
-### 4. Run unit tests
-
-No Docker needed. All tests use mocks:
-
-```bash
-python -m pytest tests/unit/ -v -m unit --cov=src --cov-fail-under=80
-```
-
-### 5. Run linting and type checks
-
-```bash
-# Ruff linter + formatter check
-ruff check src/
-ruff format --check src/
-
-# mypy type check
-# Each subdirectory uses bare imports (e.g. `from scorer import ...`) that only
-# resolve when that directory is on the Python path.  Running mypy from *inside*
-# each directory replicates what Docker does at runtime.
-for src_dir in src/orchestrator src/edge src/simulator; do
-  (cd "$src_dir" && mypy .)
-done
-
-.venv/bin/python -m mypy src/orchestrator src/edge src/simulator
-```
-
-To run all pre-commit hooks (check-yaml, check-json, hadolint, ruff, mypy,
-trailing-whitespace, etc.) install the tool and register it with git once:
-
-```bash
-pre-commit install          # registers hooks in .git/hooks, which runs once per clone
-```
-
-Then run all hooks manually against every file:
-
-```bash
-pre-commit run --all-files
-```
-
-After `pre-commit install`, hooks also run automatically on every `git commit`,
-blocking the commit if any check fails.
-
-### 5. Run integration tests
-
-Requires the full 6-container stack to be healthy (see Quick Start below).
-Start the stack first, then:
-
-```bash
-pytest tests/integration/ -v -m integration
-```
-
----
-
-## Quick Start
-
-### 1. Create your `.env` file
-
-The Orthanc nodes require credentials.  Copy the example file and set a
-password before starting any containers:
+The Orthanc nodes and the orchestrator read their secrets from `.env`. Copy the
+template and set real values **before starting any container** — Docker Compose
+interpolates these variables at startup.
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and replace every `CHANGE_ME_IN_PRODUCTION` with strong values:
+Open `.env` and replace every `CHANGE_IN_PRODUCTION` with a strong value:
 
 ```ini
 ORTHANC_USER=orthanc
@@ -162,368 +105,264 @@ ORTHANC_PASSWORD=your-strong-password-here
 ORCHESTRATOR_API_KEY=your-strong-api-key-here
 ```
 
-`ORTHANC_PASSWORD` - the config templates in `src/config/orthanc/*.template.json` substitute
-`${ORTHANC_USER}` and `${ORTHANC_PASSWORD}` at container startup, so every Orthanc
-node shares the same credentials from this single file.
-
-`ORCHESTRATOR_API_KEY` - required by both the Orchestrator (enforced on every
-endpoint) and the Forwarder (sent as `X-API-Key`). Both services fail at startup
-if the variable is missing.
+- **`ORTHANC_PASSWORD`** — the templates in `config/orthanc/*.template.json`
+  substitute `${ORTHANC_USER}` / `${ORTHANC_PASSWORD}` at container startup, so
+  every Orthanc node shares the same credentials from this one file.
+- **`ORCHESTRATOR_API_KEY`** — required by both the Orchestrator (enforced on every
+  endpoint) and the Forwarder (sent as `X-API-Key`). Both services fail fast at
+  startup if it is missing.
 
 `.env` is gitignored and must never be committed.
 
-### 2. Deploy TLS
+## Step 5 — Generate TLS certificates
 
-End-to-end TLS covers both local Docker and distributed GCP deployments.
-- Four cloud Orthanc nodes enabling DIMSE-TLS with native `SslEnabled` in Orthanc config
-- Orchestrator FastAPI enabling SSL with `--ssl-keyfile / --ssl-certfile` of Uvicorn
-- All httpx clients (Daemon, Forwarder) using SSL_CERT_FILE / REQUESTS_CA_BUNDLE env variables
-
-Note the following stays plain HTTP intentionally:
-- Redis — bound to `127.0.0.1` inside the Orchestrator container only
-
-Generate certificates using the following script:
+Every REST and DICOM link runs over TLS, so the certs must exist before the
+containers start (Orthanc won't come up without them).
 
 ```bash
 bash scripts/gen_certs.sh
 ```
 
-This output certificates below:
+This creates a self-signed CA and per-service certificates under `certs/`:
 
 ```
 certs/
-├── ca.key                          # CA private key — never commit or share
-├── ca.pem                          # CA public cert — distribute to any client that needs to verify servers
-├── orchestrator/
-│   ├── server.crt
-│   └── server.key
-├── orthanc-us/combined.pem         # cert + key in one file (Orthanc's required format)
-├── orthanc-eu/combined.pem
-├── orthanc-asia/combined.pem
-├── orthanc-af/combined.pem
-├── edge-agent/combined.pem         # Edge Orthanc uses the same combined format
-└── diomede-client/
-    ├── client.crt                  # clientAuth certificate — used by the simulator
-    └── client.key
+├── ca.key                     # CA private key — never commit or share
+├── ca.pem                     # CA public cert — distributed to every client for verification
+├── orchestrator/              # server.crt + server.key (Uvicorn TLS)
+├── orthanc-us/  … orthanc-af/ # server.crt, server.key, combined.pem, ca.pem per node
+├── edge-agent/                # same layout as a regional node
+└── diomede-client/            # client.crt + client.key (clientAuth, used by the simulator)
 ```
 
-`certs/` is gitignored.  Re-run `gen_certs.sh` on every fresh clone.
+`certs/` is gitignored — **re-run `gen_certs.sh` on every fresh clone**.
 
-You can view generated certificates with `openssl` (`x.509` for public key certificates and `rsa` for private key certificates):
+<details>
+<summary>Inspect a certificate (optional)</summary>
+
 ```bash
-# Root ca certificate
-openssl x509 -in certs/ca.pem -text -noout
-openssl rsa -in certs/ca.key -text -noout
-
-# Public certificate
+openssl x509 -in certs/ca.pem -text -noout                  # the CA
+openssl x509 -in certs/orchestrator/server.crt -text -noout # a server cert
 openssl x509 -in certs/diomede-client/client.crt -text -noout
-openssl x509 -in certs/edge-agent/server.crt -text -noout
-openssl x509 -in certs/orchestrator/server.crt -text -noout
-openssl x509 -in certs/orthanc-us/server.crt -text -noout
-openssl x509 -in certs/orthanc-eu/server.crt -text -noout
-openssl x509 -in certs/orthanc-asia/server.crt -text -noout
-openssl x509 -in certs/orthanc-af/server.crt -text -noout
-
-# Private key (no password for being used on the server)
-openssl rsa -in certs/diomede-client/client.key -text -noout
-openssl rsa -in certs/edge-agent/server.key -text -noout
-openssl rsa -in certs/orchestrator/server.key -text -noout
-openssl rsa -in certs/orthanc-us/server.key -text -noout
-openssl rsa -in certs/orthanc-eu/server.key -text -noout
-openssl rsa -in certs/orthanc-asia/server.key -text -noout
-openssl rsa -in certs/orthanc-af/server.key -text -noout
-
-# Combined server certificate
-openssl x509 -in certs/edge-agent/combined.pem -text -noout
-openssl rsa -in certs/edge-agent/combined.pem
-openssl x509 -in certs/orchestrator/combined.pem -text -noout
-openssl rsa -in certs/orchestrator/combined.pem
-openssl x509 -in certs/orthanc-us/combined.pem -text -noout
-openssl rsa -in certs/orthanc-us/combined.pem
-openssl x509 -in certs/orthanc-eu/combined.pem -text -noout
-openssl rsa -in certs/orthanc-eu/combined.pem
-openssl x509 -in certs/orthanc-asia/combined.pem -text -noout
-openssl rsa -in certs/orthanc-asia/combined.pem
-openssl x509 -in certs/orthanc-af/combined.pem -text -noout
-openssl rsa -in certs/orthanc-af/combined.pem
 ```
+</details>
 
-### 3. Pull and start the 4 regional Orthanc nodes
+## Step 6 — Start the stack
 
-The cloud PACS nodes use the pre-built `orthancteam/orthanc:26.4.2` image from
-Docker Hub:
+The four regional nodes use the pre-built `orthancteam/orthanc:26.4.2` image from
+Docker Hub; the orchestrator and edge agent build from local `Dockerfile`s.
+
 ```bash
+# Pull the Orthanc image once
 docker pull orthancteam/orthanc:26.4.2
-```
 
-To start only the 4 regional Orthanc nodes:
-```bash
+# Start the 4 regional nodes first and let them become healthy
 docker compose up -d orthanc-us orthanc-eu orthanc-asia orthanc-af
+docker compose ps          # wait for all four to show Up (healthy)
 
+# Build and start the orchestrator + edge agent
+docker compose up -d --build orchestrator edge-agent
 ```
 
-Before starting Orchestrator container, make sure nodes are healthy and reachable to
-populate Redis:
-```bash
-docker compose ps
-```
+The orchestrator waits (`depends_on: service_healthy`) for the four nodes, and the
+edge agent waits for the orchestrator — so starting them in this order avoids
+startup races.
 
-Since `orchestrator` and `edge-agent` have local Dockerfiles use `build`:
-```bash
-docker compose build orchestrator edge-agent && docker compose up -d orchestrator edge-agent
-
-docker compose build orchestrator && docker compose up -d orchestrator
-docker compose build edge-agent && docker compose up -d edge-agent
-```
-
-### 4. Inject Simulated WAN Latency
-
-The script injects three WAN metrics per node (latency, jitter, and packet loss) modeled after real Alaska → GCP paths:
-
-| Node | Latency | Jitter | Packet Loss | Rationale |
-|---|---|---|---|---|
-| `orthanc-us` | 85ms | 8ms | 0.08% | Alaska → US-East (Moncks Corner, South Carolina) |
-| `orthanc-eu` | 165ms | 17ms | 0.12% | Alaska → EU-West (St. Ghislain, Belgium) |
-| `orthanc-asia` | 115ms | 11ms | 0.08% | Alaska → Asia-Northeast (Tokyo, Japan) |
-| `orthanc-af` | 300ms | 35ms | 0.75% | Alaska → Africa-South (Johannesburg, South Africa) |
-
-> **Note:** `tc netem` delays *outbound* packets from the container (responses leaving that Orthanc node), so it captures the download half of the RTT from the Edge Agent's perspective.
-
-Apply the rules (`NET_ADMIN` is already set in `docker-compose.yml`):
+## Step 7 — Verify it's running
 
 ```bash
-bash scripts/inject_latency.sh
+docker compose ps          # all 6 containers should be Up (healthy)
 ```
 
-Verify latency is applied with a timed REST call:
+Check that the Telemetry Daemon has populated Redis (one JSON heartbeat per node):
 
 ```bash
-python3 - << 'EOF'
-import urllib.request, ssl, base64, time
-
-env = {}
-with open('.env') as f:
-    for line in f:
-        line = line.strip()
-        if line and not line.startswith('#') and '=' in line:
-            k, v = line.split('=', 1)
-            env[k] = v
-
-auth = base64.b64encode(f"{env['ORTHANC_USER']}:{env['ORTHANC_PASSWORD']}".encode()).decode()
-ctx = ssl.create_default_context()
-ctx.check_hostname = False
-ctx.verify_mode = ssl.CERT_NONE
-
-# HTTPS measures ~3.5x the injected one-way delay: tc netem delays every
-# outbound packet, and a full HTTPS request hits 3-4 of them (TCP SYN-ACK,
-# TLS handshake, response).
-for name, port, injected, expect in [('us', 8042, 85, 300), ('eu', 8043, 165, 600), ('asia', 8044, 115, 450), ('af', 8045, 300, 1000)]:
-    req = urllib.request.Request(f'https://localhost:{port}/system')
-    req.add_header('Authorization', f'Basic {auth}')
-    t = time.time()
-    urllib.request.urlopen(req, context=ctx)
-    ms = (time.time() - t) * 1000
-    print(f'orthanc-{name:<5} :{port}  {ms:6.0f}ms  (injected {injected}ms one-way, expect ~{expect}ms total)')
-EOF
+for node in us-east1 eu-west1 asia-northeast1 af-south1; do
+  echo "=========== $node ==========="
+  docker compose exec orchestrator redis-cli GET node:$node | python3 -m json.tool
+done
 ```
 
-Inspect the active rules on each node:
+Hit the orchestrator endpoints (all require the `X-API-Key` header; `-k` skips
+verification of the self-signed cert):
 
 ```bash
-docker exec orthanc-us tc qdisc show dev eth0
-docker exec orthanc-eu tc qdisc show dev eth0
-docker exec orthanc-asia tc qdisc show dev eth0
-docker exec orthanc-af tc qdisc show dev eth0
-```
+# Best node for routing
+curl -k -H "X-API-Key: your-api-key-here" \
+  "https://localhost:8000/get-best-node?agent_id=agent-001"
 
-To remove all latency rules:
-
-```bash
-bash scripts/inject_latency.sh --reset
-```
-
-> **Note:** These rules are not persistent — re-run `bash scripts/inject_latency.sh` after every `docker compose up` or container restart.
-
-### 5. Send a test DICOM
-
-Two simulator scripts are provided, each representing a different ingestion path.
-
-#### 5a. Native DICOM (DIMSE-TLS) — `send_dicom_native`
-
-Sends directly to a cloud node over a DIMSE-TLS association on port 4242.
-Use this to test the DICOM protocol stack end-to-end.
-
-```bash
-python -m src.simulator.send_dicom_native \
-  --host 127.0.0.1 \
-  --port 4242 \
-  --called-aet Orthanc_US
-```
-
-On success:
-
-```
-C-STORE success → Orthanc_US at 127.0.0.1:4242
-```
-
-#### 5b. REST simulator — `send_dicom_rest`
-
-Posts raw DICOM bytes directly to an Orthanc node via `POST /instances` over HTTPS.
-Credentials are read from `ORTHANC_USER` / `ORTHANC_PASSWORD` in `.env`.
-
-```bash
-python -m src.simulator.send_dicom_rest \
-  --base-url https://127.0.0.1:8042
-```
-
-On success:
-
-```
-REST send success → https://127.0.0.1:8042 (HTTP 200)
-```
-
-#### 6. Access FastAPI endpoints in Orchestrator
-
-All endpoints require the `X-API-Key` header matching `ORCHESTRATOR_API_KEY` from your `.env`.
-Use `-k` to skip certificate verification against the self-signed cert:
-
-```bash
-# Get the best node for routing
-curl -k -H "X-API-Key: your-api-key-here" "https://localhost:8000/get-best-node?agent_id=edge-agent"
-
-# List all registered nodes and their current telemetry
+# All registered nodes and their current telemetry
 curl -k -H "X-API-Key: your-api-key-here" "https://localhost:8000/nodes"
 
-# Post a manual heartbeat for a node
- curl -k \
+# Post a manual heartbeat (inject RTT measurements for a node)
+curl -k \
   -H "X-API-Key: your-api-key-here" \
   -H "Content-Type: application/json" \
-  -d '{"agent_id": "edge-agent", "rtt_dict": {"us-east1": 10000, "eu-west1": 10000, "asia-northeast1": 10000, "af-south1": 1000}}' \
+  -d '{"agent_id": "agent-001", "rtt_dict": {"us-east1": 10000, "eu-west1": 10000, "asia-northeast1": 10000, "af-south1": 1000}}' \
   "https://localhost:8000/heartbeat"
 ```
 
-Stop Docker container hosting the best node, then run the command above, wait for 30 seconds,
-another node should be the best node. This confirms the failover scenario.
+## Step 8 — Send a test DICOM
 
-#### 7. Probe RTT for all nodes
+Two simulator scripts model the two ingestion paths. Both read credentials from
+`.env`.
 
-To measure and print the current round-trip time from your machine to each Orthanc node:
-
-```bash
-.venv/bin/python - << 'EOF'
-import asyncio, time, httpx, ssl, json
-
-ctx = ssl.create_default_context(cafile="certs/ca.pem")
-auth = ("orthanc", "CHANGE_IN_PRODUCTION")
-nodes = {
-    "us-east1":        "https://localhost:8042",
-    "eu-west1":        "https://localhost:8043",
-    "asia-northeast1": "https://localhost:8044",
-    "af-south1":       "https://localhost:8045",
-}
-
-async def probe():
-    results = {}
-    async with httpx.AsyncClient(verify=ctx) as client:
-        for node_id, base in nodes.items():
-            t0 = time.monotonic()
-            await client.get(f"{base}/system", auth=auth, timeout=5)
-            rtt_ms = (time.monotonic() - t0) * 1000
-            results[node_id] = round(rtt_ms, 1)
-    print(json.dumps(results, indent=2))
-
-asyncio.run(probe())
-EOF
-```
-
-#### 8. Edge Agent Test
-
-Confirm the edge agent
+**8a. Native DICOM (DIMSE-TLS)** — sends over a DICOM association on port 4242,
+exercising the full DICOM protocol stack:
 
 ```bash
-curl -k -u orthanc:CHANGE_IN_PRODUCTION https://localhost:8046/system
+python -m src.simulator.send_dicom_native --host 127.0.0.1 --port 4242 --called-aet Orthanc_US
+# → C-STORE success → Orthanc_US at 127.0.0.1:4242
 ```
 
-Send a DICOM file to Edge Agent
+**8b. REST** — posts raw DICOM bytes via `POST /instances` over HTTPS:
 
 ```bash
-python -m src.simulator.send_dicom_rest --base-url https://localhost:8046
+python -m src.simulator.send_dicom_rest --base-url https://127.0.0.1:8042
+# → REST send success → https://127.0.0.1:8042 (HTTP 200)
 ```
 
-Verify instance on node
+**8c. End-to-end through the edge agent** — the real routing path. Send a study to
+the edge, then confirm it landed on a cloud node and was deleted from the edge:
 
 ```bash
-curl -k -u orthanc:CHANGE_IN_PRODUCTION https://localhost:8042/instances
+python -m src.simulator.send_dicom_rest --base-url https://localhost:8046   # send to edge
+
+curl -k -u orthanc:your-password https://localhost:8042/instances           # arrived on a cloud node
+curl -k -u orthanc:your-password https://localhost:8046/instances           # [] — edge copy deleted
 ```
 
-Now verify the copy at the edge agent is deleted
+## Step 9 — Inject simulated WAN latency
+
+Adds three WAN metrics per node (latency, jitter, packet loss) modeled on real
+Alaska → GCP paths, so routing decisions reflect geographic distance.
+
+| Node | Latency | Jitter | Packet Loss | Path |
+|---|---|---|---|---|
+| `orthanc-us` | 85 ms | 8 ms | 0.08% | Alaska → US-East (South Carolina) |
+| `orthanc-eu` | 165 ms | 17 ms | 0.12% | Alaska → EU-West (Belgium) |
+| `orthanc-asia` | 115 ms | 11 ms | 0.08% | Alaska → Asia-Northeast (Tokyo) |
+| `orthanc-af` | 300 ms | 35 ms | 0.75% | Alaska → Africa-South (Johannesburg) |
 
 ```bash
-curl -k -u orthanc:CHANGE_IN_PRODUCTION https://localhost:8046/instances
+bash scripts/inject_latency.sh           # apply (NET_ADMIN is already set in compose)
+bash scripts/inject_latency.sh --reset   # remove all rules
+docker exec orthanc-us tc qdisc show dev eth0   # inspect active rules
 ```
+
+> `tc netem` delays **outbound** packets, so it captures the download half of the
+> RTT from the edge agent's perspective. Rules are **not persistent** — re-run the
+> script after any `docker compose up` or container restart.
+
+## Step 10 — Watch a failover
+
+1. Ask for the best node: `curl -k -H "X-API-Key: ..." "https://localhost:8000/get-best-node?agent_id=agent-001"`.
+2. Stop that node: `docker compose stop orthanc-<region>`.
+3. Wait ~10–30 s (one poll cycle up to the 30 s TTL), then ask again — a **different**
+   node is now returned. The stopped node has been excluded from routing.
+4. Restart it (`docker compose start orthanc-<region>`) and it rejoins within a poll cycle.
+
+## Step 11 — Run the tests
+
+**Unit tests** — mocked, no Docker:
+
+```bash
+python -m pytest tests/unit/ -v -m unit --cov=src --cov-fail-under=80
+```
+
+**Lint + type checks:**
+
+```bash
+ruff check src/
+ruff format --check src/
+
+# mypy runs from inside each service dir because they use bare imports
+# (e.g. `from scorer import ...`) that only resolve on that dir's path — the
+# same way the containers import at runtime.
+for src_dir in src/orchestrator src/edge src/simulator; do
+  (cd "$src_dir" && mypy .)
+done
+```
+
+**Integration tests** — require the full stack (Steps 6–7) to be healthy:
+
+```bash
+pytest tests/integration/ -v -m integration
+```
+
+**Pre-commit hooks** (ruff, mypy, hadolint, check-yaml/json, trailing-whitespace):
+
+```bash
+pre-commit install          # registers hooks once per clone; they run on every commit
+pre-commit run --all-files  # run all hooks manually
+```
+
+**Load tests (optional)** — need the `load` extra (`pip install -e ".[load]"`):
+
+```bash
+locust --config tests/load/locust.conf RoutingUser --users 100 --run-time 1m
+```
+
+See [`tests/load/README.md`](../tests/load/README.md) for the full load-test options.
+
+## Step 12 — Developing new code
+
+- **Host code** (`src/simulator`, tests, the scorer under unit test) — the editable
+  install means changes are live; just re-run pytest/ruff/mypy.
+- **Containerized code** (`src/orchestrator`, `src/edge`) — the images **bake in**
+  `src/` at build time, so after editing that code rebuild and restart:
+
+  ```bash
+  docker compose up -d --build orchestrator edge-agent
+  ```
+
+- **Config/template changes** (`config/orthanc/*.template.json`, `config/*/start.sh`,
+  `.env`) — restart the affected container so it re-reads them:
+  `docker compose restart <service>`.
+
+See [Contributing](../CONTRIBUTING.md) for the branch/PR workflow and scoring-weight
+tuning, and [architecture.md](architecture.md) for how routing and dead-node
+detection work internally.
+
 ---
 
 ## Troubleshooting
 
-### Docker Containers
+Start with `docker compose ps` to list all 6 containers and their state. The
+`STATUS` column shows `Up (health: starting)`, `Up (healthy)`, `Up (unhealthy)`,
+or `Exited`:
 
-Start by running `docker compose ps` to list all 6 containers and their current state.
+- **`Up (health: starting)`** — the service URL isn't responding yet; wait and re-check.
+- **`Exited`** — the process crashed; check logs immediately.
+- **`Up (unhealthy)`** — the process runs but its health check is failing.
+- **Missing from the list** — it failed before Docker could track it; check its logs.
 
-```bash
-docker compose ps
-```
-
-The `STATUS` column shows `Up (health: starting)`, `Up (healthy)`, `Up (unhealthy)`, or `Exited`.
-- `Up (health: starting)` means the service URL is not responding yet; wait a few seconds and re-check.
-- An `Exited` status means the process crashed; check logs immediately.
-- `Up (unhealthy)` means the process is running but the healthcheck is failing.
-
-Look for the following cases:
-
-- **Missing containers** — a service that does not appear in the list failed to start before Docker could track it; check logs with `docker compose logs <service>`.
-- **Unhealthy containers** — the process is running but the health check is failing; check logs with `docker inspect <service>`
-
-#### Get logs when a container fails to start
+**Get logs:**
 
 ```bash
-# All output from one service (most useful after a startup failure)
-docker compose logs <service>
-
-# Follow in real time (Ctrl-C to stop)
-docker compose logs -f <service>
-
-# Last 50 lines only
-docker compose logs --tail=50 <service>
-
-# All services at once
-docker compose logs
+docker compose logs <service>            # all output (most useful after a startup failure)
+docker compose logs -f <service>         # follow in real time
+docker compose logs --tail=50 <service>  # last 50 lines
 ```
 
-Any of the six service names works: `orthanc-us`, `orthanc-eu`, `orthanc-asia`, `orthanc-af`, `orchestrator`, `edge-agent`.
+Service names: `orthanc-us`, `orthanc-eu`, `orthanc-asia`, `orthanc-af`,
+`orchestrator`, `edge-agent`.
 
-#### Check container status and health
-
-> **Note:** `docker compose logs` only captures output from the main service process (Orthanc or Uvicorn). To see the output of individual health-check queries including the exact HTTP requests and return codes, use `docker inspect`:
->
-> ```bash
-> docker inspect --format='{{json .State.Health}}' <service> | python3 -m json.tool
-> ```
->
-> The `Log` array in the output lists the last five health-check attempts with their exit codes and stdout/stderr.
-
-Some services only become healthy after their dependencies are healthy (e.g. `edge-agent` waits for `orchestrator`). If the dependency is unhealthy, fix it first, then restart the dependent service.
+**Inspect health-check output** (`docker compose logs` only shows the main process —
+Orthanc or Uvicorn — not the individual health probes):
 
 ```bash
-docker compose restart <service>
+docker inspect --format='{{json .State.Health}}' <service> | python3 -m json.tool
 ```
 
-Some common failures and their fixes are:
+The `Log` array lists the last five health-check attempts with exit codes and output.
+
+**Common failures:**
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `orchestrator` exits immediately | `ORCHESTRATOR_API_KEY` missing from `.env` | Add it to `.env` |
-| `orchestrator` unhealthy | Redis or uvicorn not ready within healthcheck window | `docker compose logs orchestrator` to confirm, then `docker compose restart orchestrator` |
-| `edge-agent` unhealthy | `orchestrator` not healthy yet (`depends_on` blocks it) | Wait for orchestrator to become healthy first |
-| Regional node unhealthy | Template substitution failed (bad variable replacement) or Orthanc config error | Check logs: `docker compose logs orthanc-<region>` |
-
----
+| `orchestrator` exits immediately | `ORCHESTRATOR_API_KEY` missing from `.env` | Add it to `.env`, restart |
+| `orchestrator` unhealthy | Redis or Uvicorn not ready within the healthcheck window | `docker compose logs orchestrator`, then `docker compose restart orchestrator` |
+| `edge-agent` unhealthy | `orchestrator` not healthy yet (`depends_on` blocks it) | Wait for the orchestrator to become healthy first |
+| Regional node unhealthy | Missing certs or template substitution failed | `docker compose logs orthanc-<region>`; confirm `certs/` exists (Step 5) |
+| TLS errors from host `curl` | Verifying a self-signed cert | Use `-k`, or pass `--cacert certs/ca.pem` |
