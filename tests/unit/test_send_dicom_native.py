@@ -11,8 +11,17 @@ pytestmark = pytest.mark.unit
 
 
 class TestParseArgs:
-    def test_defaults(self):
-        with patch("sys.argv", ["send_dicom_native.py"]):
+    def test_reads_from_env_vars(self):
+        env = {
+            "ORTHANC_DICOM_HOST": "localhost",
+            "ORTHANC_DICOM_PORT": "4242",
+            "ORTHANC_CALLED_AET": "Orthanc_US",
+            "ORTHANC_CALLING_AET": "Simulator",
+        }
+        with (
+            patch("sys.argv", ["send_dicom_native.py"]),
+            patch.dict("os.environ", env, clear=True),
+        ):
             args = _parse_args()
         assert args.host == "localhost"
         assert args.port == 4242
@@ -21,6 +30,14 @@ class TestParseArgs:
         assert args.ca_cert == "certs/ca.pem"
         assert args.client_cert == "certs/diomede-client/client.crt"
         assert args.client_key == "certs/diomede-client/client.key"
+
+    def test_no_fallback_when_port_unset(self):
+        with (
+            patch("sys.argv", ["send_dicom_native.py"]),
+            patch.dict("os.environ", {}, clear=True),
+            pytest.raises(RuntimeError, match="ORTHANC_DICOM_PORT"),
+        ):
+            _parse_args()
 
     def test_custom_values(self):
         with patch(

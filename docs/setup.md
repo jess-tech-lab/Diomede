@@ -22,7 +22,7 @@ Follow the steps in order — each one builds on the previous. By the end you ca
 | `orthanc-asia` | Cloud PACS node (GCP asia-northeast1) | 8044 · 4244 |
 | `orthanc-af` | Cloud PACS node (GCP af-south1) | 8045 · 4245 |
 | `orchestrator` | Redis + Telemetry Daemon + FastAPI (co-located) | 8000 |
-| `edge-agent` | Edge Orthanc + Forwarder Daemon (co-located) | 8046 · 4246 |
+| `agent-001` | Edge Orthanc + Forwarder Daemon (co-located) | 8046 · 4246 |
 
 The **orchestrator container** runs three co-located processes, mirroring the
 production VM where all three always live on the same host:
@@ -131,7 +131,7 @@ certs/
 ├── ca.pem                     # CA public cert — distributed to every client for verification
 ├── orchestrator/              # server.crt + server.key (Uvicorn TLS)
 ├── orthanc-us/  … orthanc-af/ # server.crt, server.key, combined.pem, ca.pem per node
-├── edge-agent/                # same layout as a regional node
+├── agent-001/                # same layout as a regional node
 └── diomede-client/            # client.crt + client.key (clientAuth, used by the simulator)
 ```
 
@@ -161,7 +161,7 @@ docker compose up -d orthanc-us orthanc-eu orthanc-asia orthanc-af
 docker compose ps          # wait for all four to show Up (healthy)
 
 # Build and start the orchestrator + edge agent
-docker compose up -d --build orchestrator edge-agent
+docker compose up -d --build orchestrator agent-001
 ```
 
 The orchestrator waits (`depends_on: service_healthy`) for the four nodes, and the
@@ -313,7 +313,7 @@ See [`tests/load/README.md`](../tests/load/README.md) for the full load-test opt
   `src/` at build time, so after editing that code rebuild and restart:
 
   ```bash
-  docker compose up -d --build orchestrator edge-agent
+  docker compose up -d --build orchestrator agent-001
   ```
 
 - **Config/template changes** (`config/orthanc/*.template.json`, `config/*/start.sh`,
@@ -346,7 +346,7 @@ docker compose logs --tail=50 <service>  # last 50 lines
 ```
 
 Service names: `orthanc-us`, `orthanc-eu`, `orthanc-asia`, `orthanc-af`,
-`orchestrator`, `edge-agent`.
+`orchestrator`, `agent-001`.
 
 **Inspect health-check output** (`docker compose logs` only shows the main process —
 Orthanc or Uvicorn — not the individual health probes):
@@ -363,6 +363,6 @@ The `Log` array lists the last five health-check attempts with exit codes and ou
 |---|---|---|
 | `orchestrator` exits immediately | `ORCHESTRATOR_API_KEY` missing from `.env` | Add it to `.env`, restart |
 | `orchestrator` unhealthy | Redis or Uvicorn not ready within the healthcheck window | `docker compose logs orchestrator`, then `docker compose restart orchestrator` |
-| `edge-agent` unhealthy | `orchestrator` not healthy yet (`depends_on` blocks it) | Wait for the orchestrator to become healthy first |
+| `agent-001` unhealthy | `orchestrator` not healthy yet (`depends_on` blocks it) | Wait for the orchestrator to become healthy first |
 | Regional node unhealthy | Missing certs or template substitution failed | `docker compose logs orthanc-<region>`; confirm `certs/` exists (Step 5) |
 | TLS errors from host `curl` | Verifying a self-signed cert | Use `-k`, or pass `--cacert certs/ca.pem` |

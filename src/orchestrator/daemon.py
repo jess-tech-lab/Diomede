@@ -12,52 +12,54 @@ from datetime import UTC, datetime
 
 import httpx
 import redis.asyncio as aioredis
+from dotenv import load_dotenv
 
+from src.utils.env import require_env
 from src.utils.logging_config import get_logger
 
 log = get_logger(__name__, "DAEMON")
-
+load_dotenv()
 
 # Configuration from environment
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-POLL_INTERVAL_S = int(os.getenv("POLL_INTERVAL_S", "10"))
-REDIS_TTL_S = int(os.getenv("REDIS_TTL_S", "30"))
-HTTP_TIMEOUT_S = float(os.getenv("HTTP_TIMEOUT_S", "5"))
-CA_CERT = os.getenv("REQUESTS_CA_BUNDLE", "")
+REDIS_URL = require_env("REDIS_URL")
+POLL_INTERVAL_S = int(require_env("DAEMON_POLL_INTERVAL_S"))
+REDIS_TTL_S = int(require_env("REDIS_TTL_S"))
+HTTP_TIMEOUT_S = float(require_env("HTTP_TIMEOUT_S"))
+CA_CERT = os.getenv("REQUESTS_CA_BUNDLE")
 
 
 NODES: dict[str, dict[str, str | tuple[str, str]]] = {
-    "us-east1": {
-        "base": os.getenv("NODE_US_BASE", "https://orthanc-us:8042"),
-        "ae_title": "Orthanc_US",
+    require_env("REGION1_NAME"): {
+        "base": require_env("NODE_US_BASE"),
+        "ae_title": require_env("REGION1_AET"),
         "auth": (
-            os.getenv("NODE_US_USER", "orthanc"),
-            os.getenv("NODE_US_PASS", "orthanc"),
+            require_env("NODE_US_USER"),
+            require_env("NODE_US_PASS"),
         ),
     },
-    "eu-west1": {
-        "base": os.getenv("NODE_EU_BASE", "https://orthanc-eu:8042"),
-        "ae_title": "Orthanc_EU",
+    require_env("REGION2_NAME"): {
+        "base": require_env("NODE_EU_BASE"),
+        "ae_title": require_env("REGION2_AET"),
         "auth": (
-            os.getenv("NODE_EU_USER", "orthanc"),
-            os.getenv("NODE_EU_PASS", "orthanc"),
+            require_env("NODE_EU_USER"),
+            require_env("NODE_EU_PASS"),
         ),
     },
-    "asia-northeast1": {
-        "base": os.getenv("NODE_ASIA_BASE", "https://orthanc-asia:8042"),
-        "ae_title": "Orthanc_ASIA",
+    require_env("REGION3_NAME"): {
+        "base": require_env("NODE_ASIA_BASE"),
+        "ae_title": require_env("REGION3_AET"),
         "auth": (
-            os.getenv("NODE_ASIA_USER", "orthanc"),
-            os.getenv("NODE_ASIA_PASS", "orthanc"),
+            require_env("NODE_ASIA_USER"),
+            require_env("NODE_ASIA_PASS"),
         ),
     },
-    "af-south1": {
-        "base": os.getenv("NODE_AF_BASE", "https://orthanc-af:8042"),
-        "ae_title": "Orthanc_AF",
+    require_env("REGION4_NAME"): {
+        "base": require_env("NODE_AF_BASE"),
+        "ae_title": require_env("REGION4_AET"),
         "auth": (
-            os.getenv("NODE_AF_USER", "orthanc"),
-            os.getenv("NODE_AF_PASS", "orthanc"),
+            require_env("NODE_AF_USER"),
+            require_env("NODE_AF_PASS"),
         ),
     },
 }

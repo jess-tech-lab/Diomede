@@ -7,6 +7,7 @@ Public API:
 """
 
 import math
+import os
 
 from pydicom import FileDataset, FileMetaDataset
 from pydicom import uid as dcm_uid
@@ -15,6 +16,9 @@ from pydicom import uid as dcm_uid
 _RTT_SOP_UID = "1.2.826.0.1.3680043.0.5.0.1"
 _RTT_STUDY_UID = "1.2.826.0.1.3680043.0.5.0.2"
 _RTT_SERIES_UID = "1.2.826.0.1.3680043.0.5.0.3"
+
+# Shared PatientID across every synthetic instance
+PATIENT_ID = "SIM001"
 
 
 def _base_dataset(sop_uid: str, study_uid: str, series_uid: str) -> FileDataset:
@@ -34,7 +38,7 @@ def _base_dataset(sop_uid: str, study_uid: str, series_uid: str) -> FileDataset:
 
     # Patient module
     ds.PatientName = "TEST^SIMULATOR"
-    ds.PatientID = "SIM001"
+    ds.PatientID = PATIENT_ID
 
     # Study / Series / Instance identity
     ds.StudyInstanceUID = study_uid
@@ -63,19 +67,24 @@ def make_ct_8x8() -> FileDataset:
     return ds
 
 
-def make_sized(kb: int) -> FileDataset:
+def make_sized(kb: int, random_pixels: bool = False, study_uid: str | None = None) -> FileDataset:
     """Return a synthetic image of approximately kb kilobytes.
 
     Each call generates a fresh random SOP UID when distinct instances are needed.
+
+    random_pixels: use os.urandom instead of all-zero bytes for the pixel data.
+    study_uid: share one StudyInstanceUID across multiple calls; a fresh
+    UID is generated per call when omitted.
     """
     sop_uid = dcm_uid.generate_uid()
-    study_uid = dcm_uid.generate_uid()
+    study_uid = study_uid or str(dcm_uid.generate_uid())
     series_uid = dcm_uid.generate_uid()
 
     ds = _base_dataset(sop_uid, study_uid, series_uid)
     side = math.ceil(math.sqrt(kb * 1024))
+    n_bytes = side * side
 
     ds.Rows = side
     ds.Columns = side
-    ds.PixelData = bytes(side * side)
+    ds.PixelData = os.urandom(n_bytes) if random_pixels else bytes(n_bytes)
     return ds
