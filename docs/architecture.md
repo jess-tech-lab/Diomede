@@ -56,16 +56,21 @@ spoke.
 
 ## 4. Scoring Algorithm
 
-The scoring logic is implemented in `src/orchestrator/weighted_scorer.py`), so it can be unit-tested in isolation and swapped
-for alternative implementations (round-robin, latency-only, ML-based, etc.) without touching any endpoint code.
+The scoring logic is implemented in `src/orchestrator/weighted_scorer.py`, so it can be unit-tested in isolation and swapped
+for alternative implementations (round-robin, latency-only, ML-based, etc.) without touching any endpoint code. The scorer is selected at startup by the `SCORER` environment variable (default `weighted`) via the registry in `scorer.py`.
 
 ```
 score = W_queue × (1 / (queue_size + 1))
       + W_disk  × (disk_free_mb / disk_total_mb)
-      + W_rtt   × (1 / (rtt_ms + 1))
+      + W_rtt   × (1 / (rtt_ms / rtt_ref_ms + 1))
 ```
 
-Default weights: `W_queue=0.5`, `W_disk=0.15`, `W_rtt=0.35`, which are configurable via environment variables.
+Each term is an inverse-cost signal normalized to `(0, 1]`: a shorter queue, more
+free disk, and lower RTT all raise the score, and the highest-scoring node wins.
+Default weights `W_queue=0.5`, `W_disk=0.15`, `W_rtt=0.35` (configurable via
+environment variables) and reference `rtt_ref_ms=100`. If a node has never reported
+an RTT, the scorer falls back to a neutral default so decisions degrade gracefully
+to queue depth and disk space rather than failing.
 
 ## 5. Dead-Node Detection
 
