@@ -17,6 +17,7 @@ venv/
 coverage.xml
 htmlcov/
 tests/load/report.html
+tests/load/report.csv_*.csv
 
 # Secrets and config
 .env
