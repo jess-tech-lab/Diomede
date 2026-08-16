@@ -232,6 +232,21 @@ curl -k -u orthanc:your-password https://localhost:8042/instances           # ar
 curl -k -u orthanc:your-password https://localhost:8046/instances           # [] — edge copy deleted
 ```
 
+**8d. Real DICOM file** — the simulator scripts only generate synthetic 8×8 images,
+so to send a real study use the verifier. It uploads the file to the edge, waits
+for the forwarder to route it, downloads it back from whichever cloud node won, and
+diffs every header tag and pixel against the original (exit `0` = lossless).
+
+```bash
+python -m src.utils.verify_pipeline --local-path data/sample_dicom/IM_0001
+```
+
+`data/sample_dicom/IM_0001` is a real anonymized MR slice (Philips Ingenia, 480×480,
+~460 KB) included in the repo. Drop in any other anonymized DICOM from
+[Orthanc's sample datasets](https://orthanc.uclouvain.be/downloads/sample-datasets/)
+or [Rubo Medical](https://www.rubomedical.com/dicom_files/) — `*.dcm` is gitignored,
+so downloads stay local. Never commit real patient data.
+
 ## Step 9 — Inject simulated WAN latency
 
 Adds three WAN metrics per node (latency, jitter, packet loss) modeled on real

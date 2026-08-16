@@ -27,7 +27,7 @@ from pathlib import Path
 import gevent
 import httpx
 from dotenv import load_dotenv
-from locust import HttpUser, between, events, task
+from locust import HttpUser, LoadTestShape, between, events, stats, task
 
 from src.simulator.generate_dicom import make_sized
 
@@ -60,6 +60,10 @@ _INGEST_NAME = "POST /instances"
 DRAIN_POLL_INTERVAL_S = float(os.environ.get("LOAD_DRAIN_POLL_INTERVAL_S", "1"))
 DRAIN_TIMEOUT_S = float(os.environ.get("LOAD_DRAIN_TIMEOUT_S", "5"))
 
+stats.PERCENTILES_TO_REPORT = [0.5, 0.95, 0.99]
+stats.PERCENTILES_TO_CHART = [0.5, 0.95, 0.99]
+stats.PERCENTILES_TO_STATISTICS = [0.5, 0.95, 0.99]
+
 
 def _tls_verify() -> str | bool:
     """Resolve TLS verification for the self-signed dev CA.
@@ -85,6 +89,7 @@ class RoutingUser(HttpUser):
 
     host = ORCH_URL
     wait_time = between(LOAD_MIN_INTERVAL, LOAD_MAX_INTERVAL)
+    weight = 8
 
     def on_start(self) -> None:
         self.client.verify = _VERIFY
@@ -113,6 +118,7 @@ class IngestUser(HttpUser):
 
     host = EDGE_URL
     wait_time = between(LOAD_MIN_INTERVAL, LOAD_MAX_INTERVAL)
+    weight = 2
 
     def on_start(self) -> None:
         self.client.verify = _VERIFY
@@ -209,3 +215,41 @@ def _check_kpis(environment, **_kwargs) -> None:
         environment.process_exit_code = 1
     else:
         print("[KPI] all measured KPIs within target")
+
+
+class AutoRampDownShape(LoadTestShape):
+    """
+    Natively reads standard configuration parameters (users, run-time)
+    and automatically calculates a trailing 30-second ramp-down phase.
+    """
+
+    def tick(self):
+        # 1. Fetch values directly from the configuration file
+        options = self.runner.environment.parsed_options
+
+        target_users = options.num_users or 100
+        spawn_rate = options.spawn_rate or 5
+        run_time_limit = options.run_time or 180  # Defaults to 180 seconds
+
+        # 2. Check current execution timeline
+        current_time = self.get_run_time()
+        ramp_down_duration = 30.0  # 30 seconds fixed ramp down
+        end_of_test = run_time_limit + ramp_down_duration
+
+        # Phase A: Steady State (Read directly from the config file)
+        if current_time < run_time_limit:
+            return (target_users, spawn_rate)
+
+        # Phase B: Automated 30-second Ramp Down
+        elif current_time < end_of_test:
+            time_into_ramp_down = current_time - run_time_limit
+            progress_ratio = time_into_ramp_down / ramp_down_duration
+
+            # Linearly reduce users from target_users down to 0
+            remaining_users = max(int(target_users * (1.0 - progress_ratio)), 0)
+
+            # Use a slightly aggressive spawn rate during ramp-down to disconnect users quickly
+            return (remaining_users, spawn_rate)
+
+        # Phase C: Test Gracefully Finished
+        return None
